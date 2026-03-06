@@ -1,9 +1,8 @@
-name: Deploy to GitHub Pages
+name: Deploy NovaAI
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -16,29 +15,26 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build-and-deploy:
+  deploy:
     runs-on: ubuntu-latest
-
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: ${{ steps.deploy.outputs.page_url }}
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Inject NVIDIA API Key into HTML
+      - name: Inject secrets
         run: |
-          sed -i 's|%%NVIDIA_API_KEY%%|${{ secrets.NVIDIA_API_KEY }}|g' index.html
+          sed -i \
+            -e 's|%%SUPABASE_URL%%|${{ secrets.SUPABASE_URL }}|g' \
+            -e 's|%%SUPABASE_ANON_KEY%%|${{ secrets.SUPABASE_ANON_KEY }}|g' \
+            -e 's|%%NVIDIA_API_KEY%%|${{ secrets.NVIDIA_API_KEY }}|g' \
+            index.html
 
-      - name: Setup GitHub Pages
-        uses: actions/configure-pages@v5
-
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
         with:
           path: '.'
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - uses: actions/deploy-pages@v4
+        id: deploy
