@@ -32,14 +32,17 @@ jobs:
             -e "s|%%NVIDIA_API_KEY%%|${{ secrets.NVIDIA_API_KEY }}|g" \
             index.html
           echo "✅ Secrets injected"
-          # Verify injection worked (shows first 30 chars of URL only)
-          grep -o 'createClient("[^"]*"' index.html | head -1 || echo "⚠ createClient not found"
+
+      - name: Prepare deploy folder
+        run: |
+          mkdir -p _site
+          cp index.html _site/index.html
 
       - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: '.'
+          path: '_site'
 
       - uses: actions/deploy-pages@v4
         id: deploy
