@@ -587,8 +587,7 @@ input,textarea,select{font-family:var(--font)}
 const SUPABASE_URL     = '%%SUPABASE_URL%%';
 const SUPABASE_ANON    = '%%SUPABASE_ANON_KEY%%';
 const NVIDIA_API_KEY   = '%%NVIDIA_API_KEY%%';
-const NVIDIA_BASE      = 'https://integrate.api.nvidia.com/v1';
-
+const NV_BASE = '%%PROXY_URL%%'
 // ── INIT ──────────────────────────────────────────────────────────────────────
 function isConfigured() {
   return !SUPABASE_URL.includes('%%') && !SUPABASE_ANON.includes('%%') &&
