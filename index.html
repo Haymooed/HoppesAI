@@ -1,0 +1,869 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>NV-TERMINAL // AI INTERFACE</title>
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=VT323&display=swap" rel="stylesheet"/>
+  <style>
+    :root {
+      --green: #00ff41;
+      --green-dim: #00c032;
+      --green-glow: rgba(0,255,65,0.15);
+      --green-faint: rgba(0,255,65,0.05);
+      --bg: #020c02;
+      --bg2: #050f05;
+      --border: #1a4a1a;
+      --amber: #ffb000;
+      --red: #ff3131;
+      --cyan: #00ffe1;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: var(--bg);
+      color: var(--green);
+      font-family: 'Share Tech Mono', monospace;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* Scanlines overlay */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0,0,0,0.08) 2px,
+        rgba(0,0,0,0.08) 4px
+      );
+      pointer-events: none;
+      z-index: 9999;
+    }
+
+    /* CRT vignette */
+    body::after {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: radial-gradient(ellipse at center, transparent 60%, rgba(0,0,0,0.7) 100%);
+      pointer-events: none;
+      z-index: 9998;
+    }
+
+    /* Flicker animation */
+    @keyframes flicker {
+      0%, 96%, 100% { opacity: 1; }
+      97% { opacity: 0.92; }
+      98% { opacity: 1; }
+      99% { opacity: 0.95; }
+    }
+    @keyframes blink { 0%,49%{opacity:1} 50%,100%{opacity:0} }
+    @keyframes scandown {
+      0% { transform: translateY(-100%); }
+      100% { transform: translateY(100vh); }
+    }
+    @keyframes fadeIn { from {opacity:0; transform:translateY(8px)} to {opacity:1; transform:translateY(0)} }
+    @keyframes typing { from {width:0} to {width:100%} }
+    @keyframes pulse-border {
+      0%,100% { box-shadow: 0 0 5px var(--green-glow), inset 0 0 5px var(--green-faint); }
+      50% { box-shadow: 0 0 15px var(--green-glow), inset 0 0 10px var(--green-faint); }
+    }
+
+    .screen {
+      animation: flicker 8s infinite;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Scan line sweep */
+    .scanline {
+      position: fixed;
+      width: 100%;
+      height: 3px;
+      background: linear-gradient(transparent, rgba(0,255,65,0.08), transparent);
+      animation: scandown 6s linear infinite;
+      pointer-events: none;
+      z-index: 9997;
+    }
+
+    header {
+      border-bottom: 1px solid var(--border);
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--bg2);
+      box-shadow: 0 2px 20px rgba(0,255,65,0.05);
+    }
+
+    .logo {
+      font-family: 'VT323', monospace;
+      font-size: 2rem;
+      color: var(--green);
+      text-shadow: 0 0 10px var(--green), 0 0 20px rgba(0,255,65,0.5);
+      letter-spacing: 3px;
+    }
+
+    .logo span { color: var(--cyan); text-shadow: 0 0 10px var(--cyan); }
+
+    .status-bar {
+      display: flex;
+      gap: 20px;
+      font-size: 0.7rem;
+      color: var(--green-dim);
+    }
+
+    .status-dot {
+      display: inline-block;
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 6px var(--green);
+      animation: blink 1.5s infinite;
+      margin-right: 5px;
+    }
+
+    .status-dot.amber { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
+
+    .main-layout {
+      display: flex;
+      flex: 1;
+      gap: 0;
+    }
+
+    /* Sidebar */
+    .sidebar {
+      width: 220px;
+      border-right: 1px solid var(--border);
+      background: var(--bg2);
+      padding: 16px 0;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+
+    .sidebar-title {
+      font-size: 0.65rem;
+      color: var(--green-dim);
+      padding: 0 16px 8px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 8px;
+      letter-spacing: 2px;
+    }
+
+    .mode-btn {
+      background: none;
+      border: none;
+      color: var(--green-dim);
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.75rem;
+      padding: 8px 16px;
+      text-align: left;
+      cursor: pointer;
+      transition: all 0.15s;
+      letter-spacing: 1px;
+      border-left: 3px solid transparent;
+    }
+
+    .mode-btn:hover, .mode-btn.active {
+      color: var(--green);
+      background: var(--green-faint);
+      border-left-color: var(--green);
+      text-shadow: 0 0 8px var(--green);
+    }
+
+    .mode-btn::before { content: '> '; }
+
+    .sidebar-divider {
+      height: 1px;
+      background: var(--border);
+      margin: 8px 16px;
+    }
+
+    .model-selector {
+      padding: 8px 16px;
+      font-size: 0.65rem;
+      color: var(--green-dim);
+    }
+
+    .model-selector select {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--green);
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.7rem;
+      padding: 4px 8px;
+      width: 100%;
+      margin-top: 4px;
+      cursor: pointer;
+      outline: none;
+    }
+
+    .model-selector select:focus {
+      border-color: var(--green);
+      box-shadow: 0 0 8px var(--green-glow);
+    }
+
+    /* Main chat area */
+    .chat-area {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .terminal-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 20px;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.7rem;
+      color: var(--green-dim);
+      background: var(--bg2);
+    }
+
+    .terminal-header .path { color: var(--cyan); }
+
+    #chat-log {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) var(--bg);
+    }
+
+    #chat-log::-webkit-scrollbar { width: 6px; }
+    #chat-log::-webkit-scrollbar-track { background: var(--bg); }
+    #chat-log::-webkit-scrollbar-thumb { background: var(--border); }
+
+    .msg {
+      animation: fadeIn 0.2s ease;
+      line-height: 1.6;
+      font-size: 0.85rem;
+    }
+
+    .msg-user {
+      color: var(--cyan);
+    }
+
+    .msg-user::before {
+      content: 'root@nv-terminal:~$ ';
+      color: var(--green);
+      font-weight: bold;
+    }
+
+    .msg-ai {
+      color: var(--green);
+      border-left: 2px solid var(--green-dim);
+      padding-left: 14px;
+      white-space: pre-wrap;
+    }
+
+    .msg-ai .ai-label {
+      font-size: 0.65rem;
+      color: var(--green-dim);
+      letter-spacing: 2px;
+      margin-bottom: 6px;
+      display: block;
+    }
+
+    .msg-system {
+      color: var(--amber);
+      font-size: 0.75rem;
+      opacity: 0.8;
+    }
+
+    .msg-system::before { content: '[SYS] '; }
+
+    .msg-error {
+      color: var(--red);
+      font-size: 0.8rem;
+    }
+
+    .msg-error::before { content: '[ERR] '; }
+
+    /* Code blocks inside AI responses */
+    .msg-ai pre {
+      background: rgba(0,255,65,0.04);
+      border: 1px solid var(--border);
+      padding: 10px 14px;
+      margin: 8px 0;
+      overflow-x: auto;
+      font-size: 0.8rem;
+    }
+
+    /* Thinking indicator */
+    .thinking {
+      color: var(--green-dim);
+      font-size: 0.8rem;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .thinking-dots span {
+      animation: blink 1s infinite;
+    }
+    .thinking-dots span:nth-child(2) { animation-delay: 0.3s; }
+    .thinking-dots span:nth-child(3) { animation-delay: 0.6s; }
+
+    /* Input area */
+    .input-area {
+      border-top: 1px solid var(--border);
+      padding: 16px 20px;
+      background: var(--bg2);
+    }
+
+    .input-row {
+      display: flex;
+      align-items: flex-end;
+      gap: 12px;
+    }
+
+    .input-prompt {
+      color: var(--green);
+      font-size: 0.9rem;
+      white-space: nowrap;
+      padding-bottom: 10px;
+      text-shadow: 0 0 6px var(--green);
+    }
+
+    #user-input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      border-bottom: 1px solid var(--green-dim);
+      color: var(--green);
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.85rem;
+      padding: 8px 0;
+      outline: none;
+      resize: none;
+      min-height: 40px;
+      max-height: 150px;
+      line-height: 1.5;
+      caret-color: var(--green);
+    }
+
+    #user-input:focus {
+      border-bottom-color: var(--green);
+      box-shadow: 0 2px 0 rgba(0,255,65,0.2);
+    }
+
+    #user-input::placeholder {
+      color: rgba(0,255,65,0.25);
+    }
+
+    .send-btn {
+      background: none;
+      border: 1px solid var(--green-dim);
+      color: var(--green);
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.75rem;
+      padding: 8px 16px;
+      cursor: pointer;
+      letter-spacing: 2px;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+
+    .send-btn:hover:not(:disabled) {
+      background: var(--green-glow);
+      border-color: var(--green);
+      box-shadow: 0 0 10px var(--green-glow);
+      text-shadow: 0 0 6px var(--green);
+    }
+
+    .send-btn:disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+    }
+
+    .input-hints {
+      font-size: 0.62rem;
+      color: rgba(0,255,65,0.3);
+      margin-top: 8px;
+      letter-spacing: 1px;
+    }
+
+    /* Stats panel */
+    .stats {
+      padding: 12px 16px;
+      border-top: 1px solid var(--border);
+      font-size: 0.62rem;
+      color: rgba(0,255,65,0.35);
+      display: flex;
+      gap: 20px;
+      background: var(--bg2);
+      letter-spacing: 1px;
+    }
+
+    /* Boot sequence */
+    #boot-screen {
+      position: fixed;
+      inset: 0;
+      background: var(--bg);
+      z-index: 10000;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      font-family: 'VT323', monospace;
+      font-size: 1.3rem;
+      color: var(--green);
+      padding: 40px;
+    }
+
+    #boot-screen .boot-logo {
+      font-size: 4rem;
+      text-shadow: 0 0 30px var(--green), 0 0 60px rgba(0,255,65,0.3);
+      margin-bottom: 30px;
+      letter-spacing: 8px;
+    }
+
+    #boot-lines {
+      max-width: 600px;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .boot-line {
+      opacity: 0;
+      transition: opacity 0.1s;
+      font-size: 1rem;
+    }
+
+    .boot-line.show { opacity: 1; }
+    .boot-line .ok { color: var(--green); float: right; }
+    .boot-line .warn { color: var(--amber); float: right; }
+
+    /* System prompt modal */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.85);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal-overlay.show { display: flex; }
+
+    .modal {
+      background: var(--bg2);
+      border: 1px solid var(--green-dim);
+      box-shadow: 0 0 40px rgba(0,255,65,0.1);
+      padding: 24px;
+      width: 90%;
+      max-width: 600px;
+      animation: fadeIn 0.2s ease;
+    }
+
+    .modal h3 {
+      font-family: 'VT323', monospace;
+      font-size: 1.4rem;
+      color: var(--cyan);
+      margin-bottom: 16px;
+      letter-spacing: 3px;
+    }
+
+    .modal textarea {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--green);
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.8rem;
+      padding: 12px;
+      resize: vertical;
+      min-height: 120px;
+      outline: none;
+    }
+
+    .modal textarea:focus { border-color: var(--green); }
+
+    .modal-btns {
+      display: flex;
+      gap: 12px;
+      margin-top: 16px;
+      justify-content: flex-end;
+    }
+
+    .btn-secondary {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--green-dim);
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.75rem;
+      padding: 8px 16px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .btn-secondary:hover {
+      border-color: var(--green-dim);
+      color: var(--green);
+    }
+
+    @media (max-width: 640px) {
+      .sidebar { display: none; }
+      .logo { font-size: 1.4rem; }
+      .status-bar { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="scanline"></div>
+
+<!-- Boot Screen -->
+<div id="boot-screen">
+  <div class="boot-logo">NV-TERM</div>
+  <div id="boot-lines"></div>
+</div>
+
+<!-- Main App (hidden until boot) -->
+<div class="screen" id="app" style="display:none">
+
+  <header>
+    <div class="logo">NV<span>-</span>TERMINAL <span style="font-size:1rem;letter-spacing:1px;color:var(--green-dim)">// AI INTERFACE</span></div>
+    <div class="status-bar">
+      <span><span class="status-dot"></span>NVIDIA API</span>
+      <span><span class="status-dot amber"></span>ONLINE</span>
+      <span id="time-display"></span>
+    </div>
+  </header>
+
+  <div class="main-layout">
+
+    <!-- Sidebar -->
+    <nav class="sidebar">
+      <div class="sidebar-title">// MODES</div>
+      <button class="mode-btn active" data-mode="chat" onclick="setMode(this)">CHAT</button>
+      <button class="mode-btn" data-mode="code" onclick="setMode(this)">CODE</button>
+      <button class="mode-btn" data-mode="analyze" onclick="setMode(this)">ANALYZE</button>
+      <button class="mode-btn" data-mode="creative" onclick="setMode(this)">CREATIVE</button>
+      <button class="mode-btn" data-mode="research" onclick="setMode(this)">RESEARCH</button>
+
+      <div class="sidebar-divider"></div>
+      <div class="sidebar-title">// MODEL</div>
+      <div class="model-selector">
+        <div>SELECT MODEL:</div>
+        <select id="model-select">
+          <option value="meta/llama-3.3-70b-instruct">Llama 3.3 70B</option>
+          <option value="meta/llama-3.1-8b-instruct">Llama 3.1 8B</option>
+          <option value="mistralai/mistral-7b-instruct-v0.3">Mistral 7B</option>
+          <option value="nvidia/llama-3.1-nemotron-70b-instruct">Nemotron 70B</option>
+          <option value="google/gemma-2-27b-it">Gemma 2 27B</option>
+        </select>
+      </div>
+
+      <div class="sidebar-divider"></div>
+      <div class="sidebar-title">// TOOLS</div>
+      <button class="mode-btn" onclick="showSysPrompt()">SYS PROMPT</button>
+      <button class="mode-btn" onclick="clearChat()">CLEAR LOG</button>
+    </nav>
+
+    <!-- Chat area -->
+    <div class="chat-area">
+      <div class="terminal-header">
+        <span class="path">~/nv-terminal</span>
+        <span>|</span>
+        <span id="mode-label">MODE: CHAT</span>
+        <span>|</span>
+        <span id="model-label">MODEL: Llama 3.3 70B</span>
+      </div>
+
+      <div id="chat-log">
+        <div class="msg msg-system">NV-TERMINAL v1.0.0 initialized. NVIDIA AI API connected.</div>
+        <div class="msg msg-system">Type a message below and press [ENTER] or click [TRANSMIT].</div>
+        <div class="msg msg-system">Use sidebar to switch modes and models.</div>
+      </div>
+
+      <div class="input-area">
+        <div class="input-row">
+          <span class="input-prompt">$</span>
+          <textarea id="user-input" placeholder="enter command..." rows="1"></textarea>
+          <button class="send-btn" id="send-btn" onclick="sendMessage()">TRANSMIT</button>
+        </div>
+        <div class="input-hints">[ ENTER ] SEND &nbsp;|&nbsp; [ SHIFT+ENTER ] NEW LINE &nbsp;|&nbsp; [ ↑ ] HISTORY</div>
+      </div>
+
+      <div class="stats">
+        <span>TOKENS: <span id="stat-tokens">0</span></span>
+        <span>MESSAGES: <span id="stat-msgs">0</span></span>
+        <span>SESSION: <span id="stat-time">0s</span></span>
+        <span>MODEL: <span id="stat-model">Llama 3.3 70B</span></span>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- System Prompt Modal -->
+<div class="modal-overlay" id="sys-modal">
+  <div class="modal">
+    <h3>// SYSTEM PROMPT</h3>
+    <textarea id="sys-prompt-input" placeholder="Enter system instructions for the AI...">You are a helpful AI assistant running in a retro terminal interface. Be concise, accurate, and helpful. Format code in code blocks when appropriate.</textarea>
+    <div class="modal-btns">
+      <button class="btn-secondary" onclick="closeSysPrompt()">CANCEL</button>
+      <button class="send-btn" onclick="saveSysPrompt()">APPLY</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ── CONFIG ──────────────────────────────────────────────────────────────────
+  // The API key is injected at build time by GitHub Actions
+  const NVIDIA_API_KEY = "%%NVIDIA_API_KEY%%";
+  const NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1";
+
+  // ── STATE ───────────────────────────────────────────────────────────────────
+  let chatHistory = [];
+  let totalTokens = 0;
+  let totalMsgs = 0;
+  let sessionStart = Date.now();
+  let inputHistory = [];
+  let historyIdx = -1;
+  let currentMode = "chat";
+  let systemPrompt = document.getElementById('sys-prompt-input').value;
+
+  const modePrompts = {
+    chat:     "You are a helpful AI assistant running in a retro terminal interface. Be concise and helpful.",
+    code:     "You are an expert programmer. Provide clean, well-commented code. Always use code blocks.",
+    analyze:  "You are a data analyst and critical thinker. Break down problems systematically with clear structure.",
+    creative: "You are a creative writer and brainstormer. Be imaginative, vivid, and inventive.",
+    research: "You are a research assistant. Provide thorough, well-organized information with key facts highlighted."
+  };
+
+  // ── BOOT SEQUENCE ────────────────────────────────────────────────────────────
+  const bootMessages = [
+    { text: "BIOS v2.4.1 initializing hardware...", delay: 0,   status: "ok" },
+    { text: "Memory check: 65536K OK",              delay: 200, status: "ok" },
+    { text: "Loading NV-TERMINAL kernel...",         delay: 400, status: "ok" },
+    { text: "Mounting filesystem...",                delay: 600, status: "ok" },
+    { text: "Connecting to NVIDIA API endpoint...", delay: 800, status: "ok" },
+    { text: "Validating API credentials...",         delay: 1050, status: "ok" },
+    { text: "Loading language models registry...",  delay: 1300, status: "ok" },
+    { text: "Initializing chat subsystem...",        delay: 1500, status: "ok" },
+    { text: "Starting NV-TERMINAL interface...",    delay: 1750, status: "ok" },
+  ];
+
+  window.addEventListener('DOMContentLoaded', () => {
+    const container = document.getElementById('boot-lines');
+    bootMessages.forEach(({ text, delay, status }) => {
+      setTimeout(() => {
+        const el = document.createElement('div');
+        el.className = 'boot-line';
+        el.innerHTML = `${text} <span class="${status}">[${status.toUpperCase()}]</span>`;
+        container.appendChild(el);
+        requestAnimationFrame(() => el.classList.add('show'));
+      }, delay);
+    });
+
+    setTimeout(() => {
+      document.getElementById('boot-screen').style.display = 'none';
+      document.getElementById('app').style.display = 'flex';
+    }, 2200);
+
+    updateClock();
+    setInterval(updateClock, 1000);
+    setInterval(updateSessionTime, 1000);
+  });
+
+  // ── CLOCK ────────────────────────────────────────────────────────────────────
+  function updateClock() {
+    const now = new Date();
+    document.getElementById('time-display').textContent =
+      now.toTimeString().slice(0,8);
+  }
+
+  function updateSessionTime() {
+    const s = Math.floor((Date.now() - sessionStart) / 1000);
+    document.getElementById('stat-time').textContent = s + 's';
+  }
+
+  // ── MODE ─────────────────────────────────────────────────────────────────────
+  function setMode(btn) {
+    document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentMode = btn.dataset.mode;
+    systemPrompt = modePrompts[currentMode] || modePrompts.chat;
+    document.getElementById('sys-prompt-input').value = systemPrompt;
+    document.getElementById('mode-label').textContent = `MODE: ${currentMode.toUpperCase()}`;
+    appendMsg('system', `Mode switched to: ${currentMode.toUpperCase()}`);
+  }
+
+  // ── SYSTEM PROMPT ────────────────────────────────────────────────────────────
+  function showSysPrompt() { document.getElementById('sys-modal').classList.add('show'); }
+  function closeSysPrompt() { document.getElementById('sys-modal').classList.remove('show'); }
+  function saveSysPrompt() {
+    systemPrompt = document.getElementById('sys-prompt-input').value;
+    closeSysPrompt();
+    appendMsg('system', 'System prompt updated.');
+  }
+
+  // ── MODEL SELECT ─────────────────────────────────────────────────────────────
+  document.getElementById('model-select').addEventListener('change', function() {
+    const name = this.options[this.selectedIndex].text;
+    document.getElementById('model-label').textContent = `MODEL: ${name}`;
+    document.getElementById('stat-model').textContent = name;
+    appendMsg('system', `Model switched to: ${name}`);
+  });
+
+  // ── CHAT LOG ─────────────────────────────────────────────────────────────────
+  function appendMsg(type, text) {
+    const log = document.getElementById('chat-log');
+    const div = document.createElement('div');
+    div.className = `msg msg-${type}`;
+
+    if (type === 'ai') {
+      div.innerHTML = `<span class="ai-label">// AI RESPONSE</span>${escapeAndFormat(text)}`;
+    } else {
+      div.textContent = text;
+    }
+
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+    return div;
+  }
+
+  function escapeAndFormat(text) {
+    // Escape HTML, then convert code blocks
+    let escaped = text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+
+    // Convert ```...``` blocks
+    escaped = escaped.replace(/```([\s\S]*?)```/g, '<pre>$1</pre>');
+    // Convert `inline` code
+    escaped = escaped.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+    return escaped;
+  }
+
+  function clearChat() {
+    document.getElementById('chat-log').innerHTML = '';
+    chatHistory = [];
+    totalMsgs = 0;
+    document.getElementById('stat-msgs').textContent = '0';
+    appendMsg('system', 'Chat log cleared.');
+  }
+
+  // ── SEND MESSAGE ─────────────────────────────────────────────────────────────
+  async function sendMessage() {
+    const input = document.getElementById('user-input');
+    const text = input.value.trim();
+    if (!text) return;
+
+    input.value = '';
+    input.style.height = 'auto';
+    inputHistory.unshift(text);
+    historyIdx = -1;
+
+    appendMsg('user', text);
+    chatHistory.push({ role: 'user', content: text });
+    totalMsgs++;
+    document.getElementById('stat-msgs').textContent = totalMsgs;
+
+    // Thinking indicator
+    const thinkEl = document.createElement('div');
+    thinkEl.className = 'thinking';
+    thinkEl.innerHTML = `<span>PROCESSING</span><span class="thinking-dots"><span>.</span><span>.</span><span>.</span></span>`;
+    document.getElementById('chat-log').appendChild(thinkEl);
+    document.getElementById('chat-log').scrollTop = 99999;
+
+    document.getElementById('send-btn').disabled = true;
+    input.disabled = true;
+
+    try {
+      const model = document.getElementById('model-select').value;
+
+      const response = await fetch(`${NVIDIA_BASE_URL}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${NVIDIA_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            ...chatHistory
+          ],
+          temperature: 0.7,
+          max_tokens: 1024,
+          stream: false,
+        })
+      });
+
+      thinkEl.remove();
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.message || `HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      const reply = data.choices?.[0]?.message?.content || '[No response]';
+      const tokens = data.usage?.total_tokens || 0;
+
+      totalTokens += tokens;
+      document.getElementById('stat-tokens').textContent = totalTokens;
+
+      chatHistory.push({ role: 'assistant', content: reply });
+      appendMsg('ai', reply);
+
+    } catch (err) {
+      thinkEl.remove();
+      appendMsg('error', `API Error: ${err.message}`);
+    }
+
+    document.getElementById('send-btn').disabled = false;
+    input.disabled = false;
+    input.focus();
+  }
+
+  // ── INPUT HANDLING ────────────────────────────────────────────────────────────
+  const userInput = document.getElementById('user-input');
+
+  userInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+    if (e.key === 'ArrowUp' && inputHistory.length) {
+      e.preventDefault();
+      historyIdx = Math.min(historyIdx + 1, inputHistory.length - 1);
+      userInput.value = inputHistory[historyIdx];
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      historyIdx = Math.max(historyIdx - 1, -1);
+      userInput.value = historyIdx === -1 ? '' : inputHistory[historyIdx];
+    }
+  });
+
+  // Auto-resize textarea
+  userInput.addEventListener('input', () => {
+    userInput.style.height = 'auto';
+    userInput.style.height = userInput.scrollHeight + 'px';
+  });
+</script>
+</body>
+</html>
