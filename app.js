@@ -198,7 +198,12 @@ function setActive(id) {
 
 // ── AI CHAT ───────────────────────────────────────────────────
 window.newAIChat = async () => {
-  const { data, error } = await sb.from('ai_chats').insert({ user_id: ME.id, title: 'New Chat', model: 'meta/llama-3.3-70b-instruct' }).select().single();
+  let data, error;
+  for (let i = 0; i < 3; i++) {
+    ({ data, error } = await sb.from('ai_chats').insert({ user_id: ME.id, title: 'New Chat', model: 'meta/llama-3.3-70b-instruct' }).select().single());
+    if (!error || !error.message?.includes('Lock broken')) break;
+    await new Promise(r => setTimeout(r, 300));
+  }
   if (error) { alert('Error creating chat: ' + error.message); return; }
   await loadAIChats();
   openAIChat(data.id, 'New Chat');
