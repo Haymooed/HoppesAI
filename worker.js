@@ -7,91 +7,107 @@ export default {
       'Access-Control-Allow-Headers': '*',
     };
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
-
     const json = (data, status = 200) => new Response(JSON.stringify(data), {
       status, headers: { 'Content-Type': 'application/json', ...cors }
     });
 
-    // ── GET /api/config
+    // ── Auth helper ──────────────────────────────────────────
+    async function getUser(token) {
+      if (!token) return null;
+      const r = await fetch(`${env.SUPABASE_URL}/auth/v1/user`, {
+        headers: { 'apikey': env.SUPABASE_ANON_KEY, 'Authorization': `Bearer ${token}` }
+      });
+      if (!r.ok) return null;
+      return r.json();
+    }
+    async function getProfile(userId) {
+      const r = await fetch(`${env.SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}&select=*`, {
+        headers: { 'apikey': env.SUPABASE_SERVICE_KEY, 'Authorization': `Bearer ${env.SUPABASE_SERVICE_KEY}` }
+      });
+      const d = await r.json();
+      return d[0] || null;
+    }
+    async function patchProfile(userId, data) {
+      return fetch(`${env.SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}`, {
+        method: 'PATCH',
+        headers: {
+          'apikey': env.SUPABASE_SERVICE_KEY, 'Authorization': `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+          'Content-Type': 'application/json', 'Prefer': 'return=minimal'
+        },
+        body: JSON.stringify(data)
+      });
+    }
+
+    // ── GET /api/config ──────────────────────────────────────
     if (url.pathname === '/api/config' && request.method === 'GET') {
       return json({ supabaseUrl: env.SUPABASE_URL, supabaseAnon: env.SUPABASE_ANON_KEY });
     }
 
-    // ── POST /api/chat
+    // ── POST /api/chat ───────────────────────────────────────
     if (url.pathname === '/api/chat' && request.method === 'POST') {
       try {
-        // Auth check
         const token = request.headers.get('X-User-Token');
-        if (!token) return json({ error: 'Unauthorized' }, 401);
-
-        // Get user profile via Supabase
-        const userRes = await fetch(`${env.SUPABASE_URL}/auth/v1/user`, {
-          headers: { 'apikey': env.SUPABASE_ANON_KEY, 'Authorization': `Bearer ${token}` }
-        });
-        if (!userRes.ok) return json({ error: 'Unauthorized' }, 401);
-        const user = await userRes.json();
-
-        // Get profile with message count
-        const profRes = await fetch(
-          `${env.SUPABASE_URL}/rest/v1/profiles?id=eq.${user.id}&select=tier,daily_msgs,msgs_reset_at`,
-          { headers: { 'apikey': env.SUPABASE_SERVICE_KEY, 'Authorization': `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
-        );
-        const [profile] = await profRes.json();
+        const user = await getUser(token);
+        if (!user) return json({ error: 'Unauthorized' }, 401);
+        const profile = await getProfile(user.id);
         if (!profile) return json({ error: 'Profile not found' }, 404);
 
         // Reset daily count if past midnight
         const now = new Date();
         const resetAt = new Date(profile.msgs_reset_at);
         const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        let dailyMsgs = profile.daily_msgs;
+        let dailyMsgs = profile.daily_msgs || 0;
         if (resetAt < todayMidnight) {
           dailyMsgs = 0;
-          await fetch(`${env.SUPABASE_URL}/rest/v1/profiles?id=eq.${user.id}`, {
-            method: 'PATCH',
-            headers: {
-              'apikey': env.SUPABASE_SERVICE_KEY, 'Authorization': `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-              'Content-Type': 'application/json', 'Prefer': 'return=minimal'
-            },
-            body: JSON.stringify({ daily_msgs: 0, msgs_reset_at: now.toISOString() })
-          });
+          await patchProfile(user.id, { daily_msgs: 0, msgs_reset_at: now.toISOString() });
         }
 
-        // Check limit for free users
-        const DAILY_LIMIT = 50;
-        if (profile.tier === 'free' && dailyMsgs >= DAILY_LIMIT) {
-          // Calculate time until midnight
+        // Check limit
+        const LIMIT = 50;
+        if (profile.tier === 'free' && dailyMsgs >= LIMIT) {
           const midnight = new Date(todayMidnight.getTime() + 86400000);
-          const msUntil = midnight - now;
-          const hrs = Math.floor(msUntil / 3600000);
-          const mins = Math.floor((msUntil % 3600000) / 60000);
+          const ms = midnight - now;
+          const hrs = Math.floor(ms / 3600000), mins = Math.floor((ms % 3600000) / 60000);
           return json({ error: 'limit_reached', resetIn: `${hrs}h ${mins}m` }, 429);
         }
 
-        // Choose model based on tier
         const body = await request.json();
-        const model = profile.tier === 'pro'
-          ? 'llama-3.3-70b-versatile'   // NovaAI Pro
-          : 'llama-3.1-8b-instant';   // NovaAI Free
+        const model = profile.tier === 'pro' ? 'llama-3.3-70b-versatile' : 'llama-3.1-8b-instant';
+
+        // Web search if requested
+        let searchContext = '';
+        if (body.useWebSearch && env.TAVILY_API_KEY) {
+          const lastMsg = body.messages[body.messages.length - 1]?.content || '';
+          try {
+            const sr = await fetch('https://api.tavily.com/search', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ api_key: env.TAVILY_API_KEY, query: lastMsg, max_results: 5, search_depth: 'basic' })
+            });
+            const sd = await sr.json();
+            if (sd.results?.length) {
+              searchContext = '\n\n[Web Search Results]\n' + sd.results.map(r => `• ${r.title}: ${r.content} (${r.url})`).join('\n') + '\n[Use these results to inform your answer. Cite sources where relevant.]\n';
+            }
+          } catch(_) {}
+        }
+
+        // Inject search context into system message
+        const messages = body.messages.map((m, i) => {
+          if (i === 0 && m.role === 'system' && searchContext) {
+            return { ...m, content: m.content + searchContext };
+          }
+          return m;
+        });
 
         const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
           method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${env.GROQ_API_KEY}`,
-            'Content-Type': 'application/json', 'Accept': 'application/json',
-          },
-          body: JSON.stringify({ ...body, model })
+          headers: { 'Authorization': `Bearer ${env.GROQ_API_KEY}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model, messages, temperature: body.temperature || 0.7, max_tokens: body.max_tokens || 2048 })
         });
         const data = await res.json();
 
-        // Increment message count
-        await fetch(`${env.SUPABASE_URL}/rest/v1/profiles?id=eq.${user.id}`, {
-          method: 'PATCH',
-          headers: {
-            'apikey': env.SUPABASE_SERVICE_KEY, 'Authorization': `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-            'Content-Type': 'application/json', 'Prefer': 'return=minimal'
-          },
-          body: JSON.stringify({ daily_msgs: dailyMsgs + 1, msgs_reset_at: profile.msgs_reset_at })
-        });
+        // Increment count
+        await patchProfile(user.id, { daily_msgs: dailyMsgs + 1 });
 
         return new Response(JSON.stringify({ ...data, _dailyMsgs: dailyMsgs + 1 }), {
           status: res.status, headers: { 'Content-Type': 'application/json', ...cors }
@@ -101,67 +117,114 @@ export default {
       }
     }
 
-    // ── POST /api/admin/set-tier (admin only)
-    if (url.pathname === '/api/admin/set-tier' && request.method === 'POST') {
+    // ── POST /api/imagine ────────────────────────────────────
+    if (url.pathname === '/api/imagine' && request.method === 'POST') {
       try {
         const token = request.headers.get('X-User-Token');
-        if (!token) return json({ error: 'Unauthorized' }, 401);
+        const user = await getUser(token);
+        if (!user) return json({ error: 'Unauthorized' }, 401);
+        const profile = await getProfile(user.id);
+        if (!profile) return json({ error: 'Profile not found' }, 404);
 
-        // Verify requester is admin
-        const userRes = await fetch(`${env.SUPABASE_URL}/auth/v1/user`, {
-          headers: { 'apikey': env.SUPABASE_ANON_KEY, 'Authorization': `Bearer ${token}` }
+        // Check image limits
+        const now = new Date();
+        const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const imgReset = new Date(profile.imgs_reset_at || 0);
+        let dailyImgs = imgReset < todayMidnight ? 0 : (profile.daily_imgs || 0);
+        const IMG_LIMIT = profile.tier === 'pro' ? 10 : 3;
+
+        if (dailyImgs >= IMG_LIMIT) {
+          const midnight = new Date(todayMidnight.getTime() + 86400000);
+          const ms = midnight - now;
+          const hrs = Math.floor(ms / 3600000), mins = Math.floor((ms % 3600000) / 60000);
+          return json({ error: 'img_limit_reached', resetIn: `${hrs}h ${mins}m`, limit: IMG_LIMIT }, 429);
+        }
+
+        const { prompt } = await request.json();
+        if (!prompt) return json({ error: 'Prompt required' }, 400);
+
+        // Cloudflare AI - Flux
+        const imgRes = await fetch(`https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/ai/run/@cf/black-forest-labs/flux-1-schnell`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${env.CF_AI_TOKEN}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt, num_steps: 4 })
         });
-        const user = await userRes.json();
-        const adminRes = await fetch(
-          `${env.SUPABASE_URL}/rest/v1/profiles?id=eq.${user.id}&select=is_admin`,
-          { headers: { 'apikey': env.SUPABASE_SERVICE_KEY, 'Authorization': `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
-        );
-        const [admin] = await adminRes.json();
-        if (!admin?.is_admin) return json({ error: 'Forbidden' }, 403);
 
-        const { targetUserId, tier } = await request.json();
-        if (!['free', 'pro'].includes(tier)) return json({ error: 'Invalid tier' }, 400);
+        if (!imgRes.ok) {
+          const err = await imgRes.text();
+          return json({ error: 'Image generation failed: ' + err }, 500);
+        }
 
-        await fetch(`${env.SUPABASE_URL}/rest/v1/profiles?id=eq.${targetUserId}`, {
-          method: 'PATCH',
-          headers: {
-            'apikey': env.SUPABASE_SERVICE_KEY, 'Authorization': `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-            'Content-Type': 'application/json', 'Prefer': 'return=minimal'
-          },
-          body: JSON.stringify({ tier })
+        // Returns image bytes — convert to base64
+        const imgBytes = await imgRes.arrayBuffer();
+        const base64 = btoa(String.fromCharCode(...new Uint8Array(imgBytes)));
+
+        // Update image count
+        await patchProfile(user.id, {
+          daily_imgs: dailyImgs + 1,
+          imgs_reset_at: imgReset < todayMidnight ? now.toISOString() : profile.imgs_reset_at
         });
-        return json({ success: true });
+
+        return json({ image: `data:image/jpeg;base64,${base64}`, _dailyImgs: dailyImgs + 1, limit: IMG_LIMIT });
       } catch (err) {
         return json({ error: err.message }, 500);
       }
     }
 
-    // ── GET /api/admin/users (admin only)
-    if (url.pathname === '/api/admin/users' && request.method === 'GET') {
+    // ── POST /api/analyse-file ───────────────────────────────
+    if (url.pathname === '/api/analyse-file' && request.method === 'POST') {
       try {
         const token = request.headers.get('X-User-Token');
-        if (!token) return json({ error: 'Unauthorized' }, 401);
+        const user = await getUser(token);
+        if (!user) return json({ error: 'Unauthorized' }, 401);
+        const profile = await getProfile(user.id);
+        const body = await request.json();
+        const { fileContent, fileName, userQuestion } = body;
+        const model = profile?.tier === 'pro' ? 'llama-3.3-70b-versatile' : 'llama-3.1-8b-instant';
 
-        const userRes = await fetch(`${env.SUPABASE_URL}/auth/v1/user`, {
-          headers: { 'apikey': env.SUPABASE_ANON_KEY, 'Authorization': `Bearer ${token}` }
+        const messages = [
+          { role: 'system', content: 'You are NovaAI. The user has uploaded a file for you to analyse. Read the content carefully and answer their question accurately.' },
+          { role: 'user', content: `File: ${fileName}\n\nContent:\n${fileContent.slice(0, 12000)}\n\n${userQuestion || 'Please summarise and analyse this file.'}` }
+        ];
+
+        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${env.GROQ_API_KEY}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model, messages, temperature: 0.3, max_tokens: 2048 })
         });
-        const user = await userRes.json();
-        const adminRes = await fetch(
-          `${env.SUPABASE_URL}/rest/v1/profiles?id=eq.${user.id}&select=is_admin`,
-          { headers: { 'apikey': env.SUPABASE_SERVICE_KEY, 'Authorization': `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
-        );
-        const [admin] = await adminRes.json();
-        if (!admin?.is_admin) return json({ error: 'Forbidden' }, 403);
-
-        const usersRes = await fetch(
-          `${env.SUPABASE_URL}/rest/v1/profiles?select=id,username,display_name,tier,daily_msgs,is_admin,avatar_color&order=created_at.desc`,
-          { headers: { 'apikey': env.SUPABASE_SERVICE_KEY, 'Authorization': `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
-        );
-        const users = await usersRes.json();
-        return json(users);
+        const data = await res.json();
+        return json({ reply: data.choices?.[0]?.message?.content || 'Could not analyse file.' });
       } catch (err) {
         return json({ error: err.message }, 500);
       }
+    }
+
+    // ── POST /api/admin/set-tier ─────────────────────────────
+    if (url.pathname === '/api/admin/set-tier' && request.method === 'POST') {
+      try {
+        const token = request.headers.get('X-User-Token');
+        const user = await getUser(token);
+        const admin = await getProfile(user?.id);
+        if (!admin?.is_admin) return json({ error: 'Forbidden' }, 403);
+        const { targetUserId, tier } = await request.json();
+        if (!['free', 'pro'].includes(tier)) return json({ error: 'Invalid tier' }, 400);
+        await patchProfile(targetUserId, { tier });
+        return json({ success: true });
+      } catch (err) { return json({ error: err.message }, 500); }
+    }
+
+    // ── GET /api/admin/users ─────────────────────────────────
+    if (url.pathname === '/api/admin/users' && request.method === 'GET') {
+      try {
+        const token = request.headers.get('X-User-Token');
+        const user = await getUser(token);
+        const admin = await getProfile(user?.id);
+        if (!admin?.is_admin) return json({ error: 'Forbidden' }, 403);
+        const r = await fetch(`${env.SUPABASE_URL}/rest/v1/profiles?select=id,username,display_name,tier,daily_msgs,daily_imgs,is_admin,avatar_color&order=created_at.desc`, {
+          headers: { 'apikey': env.SUPABASE_SERVICE_KEY, 'Authorization': `Bearer ${env.SUPABASE_SERVICE_KEY}` }
+        });
+        return new Response(await r.text(), { headers: { 'Content-Type': 'application/json', ...cors } });
+      } catch (err) { return json({ error: err.message }, 500); }
     }
 
     return env.ASSETS.fetch(request);
