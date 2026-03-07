@@ -20,13 +20,7 @@
 <div id="config-error" class="hidden">
   <div class="cfg-box">
     <h2>⚠ Configuration Missing</h2>
-    <p>Secrets haven't been injected. This only works on the live GitHub Pages URL after a successful deploy.</p>
-    <ol>
-      <li>Make sure all 4 GitHub Secrets are set: <code>SUPABASE_URL</code>, <code>SUPABASE_ANON_KEY</code>, <code>NVIDIA_API_KEY</code>, <code>PROXY_URL</code></li>
-      <li>Push to <code>main</code> branch</li>
-      <li>Go to <strong>Actions → Deploy NovaAI → Run workflow</strong></li>
-      <li>Visit your live <code>github.io</code> URL</li>
-    </ol>
+    <p>Environment variables not set. Add them in Cloudflare Worker settings.</p>
   </div>
 </div>
 
@@ -34,9 +28,7 @@
 <div id="auth-wrap" class="hidden">
   <div class="auth-box">
     <div class="auth-brand">
-      <div class="logo-icon">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-      </div>
+      <div class="logo-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
       <span>NovaAI</span>
     </div>
     <div class="auth-tabs">
@@ -57,18 +49,10 @@
       <div class="auth-err" id="login-err"></div>
     </div>
     <div id="form-up" class="hidden">
-      <div class="auth-field"><label>Username</label>
-        <input id="ru-user" type="text" placeholder="coolname" autocomplete="username"/>
-      </div>
-      <div class="auth-field"><label>Email</label>
-        <input id="ru-email" type="email" placeholder="you@example.com" autocomplete="email"/>
-      </div>
-      <div class="auth-field"><label>Password</label>
-        <input id="ru-pass" type="password" placeholder="Min 6 characters" autocomplete="new-password"/>
-      </div>
-      <div class="auth-field"><label>Confirm Password</label>
-        <input id="ru-conf" type="password" placeholder="Repeat password" autocomplete="new-password" onkeydown="if(event.key==='Enter')doRegister()"/>
-      </div>
+      <div class="auth-field"><label>Username</label><input id="ru-user" type="text" placeholder="coolname" autocomplete="username"/></div>
+      <div class="auth-field"><label>Email</label><input id="ru-email" type="email" placeholder="you@example.com" autocomplete="email"/></div>
+      <div class="auth-field"><label>Password</label><input id="ru-pass" type="password" placeholder="Min 6 characters" autocomplete="new-password"/></div>
+      <div class="auth-field"><label>Confirm Password</label><input id="ru-conf" type="password" placeholder="Repeat password" autocomplete="new-password" onkeydown="if(event.key==='Enter')doRegister()"/></div>
       <button class="auth-submit" id="reg-btn" onclick="doRegister()">
         <span id="reg-label">Create Account</span>
         <div id="reg-spin" class="spinner hidden" style="width:16px;height:16px;border-width:2px;border-top-color:#fff;border-color:rgba(255,255,255,.3)"></div>
@@ -93,13 +77,18 @@
       <div id="ai-list"></div>
       <div class="sb-label">
         Direct Messages
-        <button onclick="openDMModal()" title="New message">
+        <button onclick="openDMModal()" title="New DM">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         </button>
       </div>
       <div id="dm-list"></div>
     </div>
     <div class="sb-bottom">
+      <div id="msg-counter" class="msg-counter"></div>
+      <button id="admin-sidebar-btn" class="admin-sb-btn hidden" onclick="openAdmin()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+        Admin Panel
+      </button>
       <button class="user-row" onclick="openProfile()">
         <div class="av" id="sb-av">?</div>
         <div class="ur-info">
@@ -115,9 +104,7 @@
 
   <div class="main">
     <div id="empty">
-      <div class="e-icon">
-        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-      </div>
+      <div class="e-icon"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
       <p>Select a chat or start a new one</p>
     </div>
     <div id="chat-view" class="hidden">
@@ -126,13 +113,7 @@
         <div class="chat-stats">Tokens: <span id="st-tok">0</span> &nbsp;·&nbsp; Msgs: <span id="st-msg">0</span></div>
       </div>
       <div id="model-bar">
-        <select id="model-select" onchange="saveModel()">
-          <option value="meta/llama-3.3-70b-instruct">⚡ Llama 3.3 70B</option>
-          <option value="meta/llama-3.1-8b-instruct">🟢 Llama 3.1 8B (Fast)</option>
-          <option value="mistralai/mistral-7b-instruct-v0.3">🔵 Mistral 7B</option>
-          <option value="nvidia/llama-3.1-nemotron-70b-instruct">🟣 Nemotron 70B</option>
-          <option value="google/gemma-2-27b-it">🔴 Gemma 2 27B</option>
-        </select>
+        <div id="model-label" class="model-label">🟢 NovaAI Free</div>
       </div>
       <div id="msgs"></div>
       <div class="input-zone">
@@ -150,38 +131,61 @@
   </div>
 </div>
 
+<!-- LIMIT MODAL -->
+<div class="modal-bg" id="limit-modal" onclick="if(event.target===this)closeLimitModal()">
+  <div class="modal" style="text-align:center;max-width:360px">
+    <div style="font-size:2.5rem;margin-bottom:12px">🚫</div>
+    <h3 style="font-size:1.1rem;margin-bottom:8px">Daily limit reached</h3>
+    <p style="color:var(--text2);font-size:.875rem;margin-bottom:6px">You've used all 50 free messages for today.</p>
+    <p id="limit-reset-time" style="color:var(--text3);font-size:.8rem;margin-bottom:20px"></p>
+    <button class="m-btn" onclick="closeLimitModal()">Got it</button>
+  </div>
+</div>
+
 <!-- DM MODAL -->
 <div class="modal-bg" id="dm-modal" onclick="if(event.target===this)closeDMModal()">
   <div class="modal">
-    <div class="modal-head">
-      <h3>New Direct Message</h3>
+    <div class="modal-head"><h3>New Direct Message</h3>
       <button class="modal-x" onclick="closeDMModal()"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
     </div>
-    <input class="m-input" id="dm-search" placeholder="Search by username or name…" oninput="filterUsers()"/>
-    <div id="user-results"><div style="color:var(--text3);font-size:.85rem;padding:8px">No other users yet.</div></div>
+    <input class="m-input" id="dm-search" placeholder="Search by username…" oninput="filterUsers()"/>
+    <div id="user-results"></div>
   </div>
 </div>
 
 <!-- PROFILE MODAL -->
 <div class="modal-bg" id="prof-modal" onclick="if(event.target===this)closeProfModal()">
   <div class="modal">
-    <div class="modal-head">
-      <h3>Your Profile</h3>
+    <div class="modal-head"><h3>Your Profile</h3>
       <button class="modal-x" onclick="closeProfModal()"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
     </div>
-    <div class="prof-av" id="prof-av">?</div>
-    <div class="prof-name">
-      <div class="pn" id="prof-dn"></div>
-      <div class="pu" id="prof-un"></div>
+    <div class="prof-av-wrap">
+      <div class="prof-av" id="prof-av">?</div>
+      <label class="avatar-upload-btn" title="Upload photo">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        <input type="file" accept="image/*" style="display:none" onchange="handleAvatarUpload(this)"/>
+      </label>
     </div>
-    <div class="prof-field">
-      <label>Bio</label>
-      <textarea id="prof-bio" placeholder="Tell others about yourself…"></textarea>
-    </div>
+    <div class="prof-name"><div class="pn" id="prof-dn"></div><div class="pu" id="prof-un"></div></div>
+    <div class="prof-field"><label>Display Name</label><input class="m-input" id="prof-name-edit" type="text" style="margin-bottom:0"/></div>
+    <div class="prof-field"><label>Avatar Color</label><div id="color-picker" class="color-picker-grid"></div></div>
+    <div class="prof-field"><label>Bio</label><textarea id="prof-bio" placeholder="Tell others about yourself…"></textarea></div>
     <div style="display:flex;align-items:center">
       <button class="m-btn" onclick="saveProfile()">Save</button>
       <span class="saved-ok hidden" id="saved-ok">✓ Saved!</span>
     </div>
+  </div>
+</div>
+
+<!-- ADMIN MODAL -->
+<div class="modal-bg" id="admin-modal" onclick="if(event.target===this)closeAdmin()">
+  <div class="modal" style="width:540px;max-width:95vw">
+    <div class="modal-head">
+      <h3>🛡 Admin Panel</h3>
+      <button class="modal-x" onclick="closeAdmin()"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+    </div>
+    <input class="m-input" id="admin-search" placeholder="Search users…" oninput="filterAdminUsers()"/>
+    <div id="admin-user-list"></div>
   </div>
 </div>
 
