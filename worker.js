@@ -70,13 +70,13 @@ export default {
         // Choose model based on tier
         const body = await request.json();
         const model = profile.tier === 'pro'
-          ? 'meta/llama-3.3-70b-instruct'   // NovaAI Pro
-          : 'meta/llama-3.1-8b-instruct';   // NovaAI Free
+          ? 'llama-3.3-70b-versatile'   // NovaAI Pro
+          : 'llama-3.1-8b-instant';   // NovaAI Free
 
-        const res = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
+        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${env.NVIDIA_API_KEY}`,
+            'Authorization': `Bearer ${env.GROQ_API_KEY}`,
             'Content-Type': 'application/json', 'Accept': 'application/json',
           },
           body: JSON.stringify({ ...body, model })
