@@ -143,20 +143,47 @@ export default {
         const { prompt } = await request.json();
         if (!prompt) return json({ error: 'Prompt required' }, 400);
 
-        // Cloudflare AI - Flux
-        const imgRes = await fetch(`https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/ai/run/@cf/black-forest-labs/flux-1-schnell`, {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${env.CF_AI_TOKEN}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt, num_steps: 4 })
-        });
+        // Cloudflare AI - try Flux first, fall back to stable diffusion
+        const cfBase = `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/ai/run`;
+        const cfHeaders = { 'Authorization': `Bearer ${env.CF_AI_TOKEN}`, 'Content-Type': 'application/json' };
 
-        if (!imgRes.ok) {
-          const err = await imgRes.text();
-          return json({ error: 'Image generation failed: ' + err }, 500);
+        const tryModel = async (modelPath, body) => {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 25000); // 25s timeout
+          try {
+            const r = await fetch(`${cfBase}/${modelPath}`, {
+              method: 'POST', headers: cfHeaders,
+              body: JSON.stringify(body), signal: controller.signal
+            });
+            clearTimeout(timer);
+            return r;
+          } catch(e) {
+            clearTimeout(timer);
+            throw e;
+          }
+        };
+
+        let imgRes;
+        try {
+          imgRes = await tryModel('@cf/black-forest-labs/flux-1-schnell', { prompt, num_steps: 4 });
+          if (!imgRes.ok) throw new Error('flux failed');
+        } catch(_) {
+          // Fallback to stable diffusion XL
+          try {
+            imgRes = await tryModel('@cf/stabilityai/stable-diffusion-xl-base-1.0', { prompt });
+          } catch(e) {
+            return json({ error: 'Image generation timed out. Try a shorter prompt or try again.' }, 504);
+          }
+        }
+
+        if (!imgRes || !imgRes.ok) {
+          const errText = await imgRes?.text() || 'unknown error';
+          return json({ error: 'Image generation failed: ' + errText }, 500);
         }
 
         // Returns image bytes — convert to base64
         const imgBytes = await imgRes.arrayBuffer();
+        if (!imgBytes.byteLength) return json({ error: 'Empty image returned. Try again.' }, 500);
         const base64 = btoa(String.fromCharCode(...new Uint8Array(imgBytes)));
 
         // Update image count
