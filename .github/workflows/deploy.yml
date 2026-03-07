@@ -24,20 +24,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Inject secrets into index.html
+      - name: Inject secrets into config.js
         run: |
           sed -i \
             -e "s|%%SUPABASE_URL%%|${{ secrets.SUPABASE_URL }}|g" \
             -e "s|%%SUPABASE_ANON_KEY%%|${{ secrets.SUPABASE_ANON_KEY }}|g" \
             -e "s|%%NVIDIA_API_KEY%%|${{ secrets.NVIDIA_API_KEY }}|g" \
             -e "s|%%PROXY_URL%%|${{ secrets.PROXY_URL }}|g" \
-            index.html
-          echo "✅ Secrets injected"
+            config.js
+          echo "✅ Secrets injected into config.js"
 
       - name: Prepare deploy folder
         run: |
           mkdir -p _site
-          cp index.html _site/index.html
+          cp index.html _site/
+          cp style.css _site/
+          cp config.js _site/
+          cp app.js _site/
 
       - uses: actions/configure-pages@v5
 
