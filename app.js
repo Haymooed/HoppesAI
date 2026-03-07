@@ -958,8 +958,12 @@ function handleKey(e) {
 }
 
 function autoResize(el) {
-  el.style.height = 'auto';
+  // Temporarily remove oninput to prevent recursive firing
+  const prev = el.oninput;
+  el.oninput = null;
+  el.style.height = '36px';
   el.style.height = Math.min(el.scrollHeight, 180) + 'px';
+  el.oninput = prev;
 }
 
 function setInput(text) {
@@ -982,20 +986,51 @@ function escHtml(str) {
 }
 
 function renderMarkdown(text) {
-  return text
-    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-    .replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => `<pre><code class="lang-${lang}">${code.trim()}</code></pre>`)
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*([^*]+)\*/g, '<em>$1</em>')
-    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
-    .replace(/^## (.+)$/gm, '<h2>$1</h2>')
-    .replace(/^# (.+)$/gm, '<h1>$1</h1>')
-    .replace(/^[-*] (.+)$/gm, '<li>$1</li>')
-    .replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>')
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
-    .replace(/\n\n/g, '</p><p>')
-    .replace(/^(?!<[hua]|<li|<pre|<code)(.+)$/gm, (m) => m.startsWith('<') ? m : m);
+  // Escape HTML first
+  let out = text
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;');
+
+  // Code blocks (must come before inline code)
+  out = out.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) =>
+    `<pre><code>${code.trim()}</code></pre>`);
+
+  // Inline code
+  out = out.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+
+  // Bold and italic
+  out = out.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+  out = out.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+
+  // Headings
+  out = out.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  out = out.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+  out = out.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+
+  // Links
+  out = out.replace(/\[([^\]]+)\]\(([^)]+)\)/g,
+    '<a href="$2" target="_blank" rel="noopener">$1</a>');
+
+  // Lists — convert lines starting with - or * to <li>, wrap runs in <ul>
+  out = out.replace(/(^[-*] .+(\n[-*] .+)*)/gm, (block) => {
+    const items = block.replace(/^[-*] (.+)$/gm, '<li>$1</li>');
+    return '<ul>' + items + '</ul>';
+  });
+
+  // Numbered lists
+  out = out.replace(/(^\d+\. .+(\n\d+\. .+)*)/gm, (block) => {
+    const items = block.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+    return '<ol>' + items + '</ol>';
+  });
+
+  // Paragraphs — double newlines
+  out = out.replace(/\n\n+/g, '</p><p>');
+
+  // Single newlines → <br> (but not inside pre blocks)
+  out = out.replace(/\n/g, '<br>');
+
+  return '<p>' + out + '</p>';
 }
 
 // ── Init ───────────────────────────────────────────────────
