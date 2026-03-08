@@ -132,7 +132,7 @@ function refreshImgCounter() {
 
 // ── Section switching ──────────────────────────────────────
 function setActiveSection(section) {
-  ['chats','groups','updates'].forEach(s => {
+  ['chats','groups','updates','images'].forEach(s => {
     document.getElementById('nav-' + s)?.classList.toggle('active', s === section);
   });
   document.getElementById('chat-list').classList.toggle('hidden', section !== 'chats');
@@ -140,6 +140,7 @@ function setActiveSection(section) {
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   document.getElementById('panel-' + section)?.classList.add('active');
   if (section === 'updates') { loadUpdateLog(); document.getElementById('updates-badge').classList.add('hidden'); }
+  if (section === 'images') loadImagesPanel();
   closeSidebar();
 }
 
@@ -228,25 +229,55 @@ function appendMsg(role, content) {
   el.scrollTop = el.scrollHeight;
 }
 
-function appendImgMsg(src) {
-  // Use DOM methods — never put large base64 into innerHTML (call stack overflow)
+function appendImgMsg(src, prompt, imgId) {
   const container = document.getElementById('messages');
   const wrap = document.createElement('div');
   wrap.className = 'message ai';
+
   const av = document.createElement('div');
   av.className = 'msg-av nova-av';
   av.textContent = 'N';
+
   const body = document.createElement('div');
   body.className = 'msg-body';
+
   const img = document.createElement('img');
   img.className = 'msg-image';
-  img.alt = 'Generated image';
-  img.onclick = function() { window.open(src, '_blank'); };
+  img.alt = prompt || 'Generated image';
   img.src = src;
+
+  // Action buttons row
+  const actions = document.createElement('div');
+  actions.className = 'img-actions';
+
+  const dlBtn = document.createElement('button');
+  dlBtn.className = 'img-action-btn';
+  dlBtn.title = 'Download';
+  dlBtn.innerHTML = '⬇️ Download';
+  dlBtn.onclick = () => downloadImage(src, prompt);
+
+  const editBtn = document.createElement('button');
+  editBtn.className = 'img-action-btn';
+  editBtn.title = 'Edit prompt';
+  editBtn.innerHTML = '✏️ Edit';
+  editBtn.onclick = () => openEditImage(src, prompt || '');
+
+  const viewBtn = document.createElement('button');
+  viewBtn.className = 'img-action-btn';
+  viewBtn.title = 'Open full size';
+  viewBtn.innerHTML = '🔍 Full size';
+  viewBtn.onclick = () => window.open(src, '_blank');
+
+  actions.appendChild(dlBtn);
+  actions.appendChild(editBtn);
+  actions.appendChild(viewBtn);
+
   const time = document.createElement('div');
   time.className = 'msg-time';
   time.textContent = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+
   body.appendChild(img);
+  body.appendChild(actions);
   body.appendChild(time);
   wrap.appendChild(av);
   wrap.appendChild(body);
@@ -452,7 +483,9 @@ async function doGenerateImage(prompt) {
       return;
     }
     if (data.error) { showToast(data.error, 'error'); return; }
-    appendImgMsg(data.image);
+    // Use persistent URL if available, else base64
+    const displaySrc = data.url || data.image;
+    appendImgMsg(displaySrc, prompt, data.imgId);
     DAILY_IMGS = data._dailyImgs ?? (DAILY_IMGS + 1);
     refreshImgCounter();
   } catch(e) { clearTimeout(t); hideTyping(); setLoading(false); showToast('Image generation failed', 'error'); }
@@ -881,6 +914,113 @@ function mdRender(text) {
   o = o.replace(/\n\n+/g, '</p><p>');
   o = o.replace(/\n/g, '<br>');
   return '<p>' + o + '</p>';
+}
+
+// ── Images Panel ──────────────────────────────────────────
+async function loadImagesPanel() {
+  const grid = document.getElementById('images-grid');
+  grid.innerHTML = '<div class="empty-state">Loading…</div>';
+  const { data, error } = await SB.from('generated_images')
+    .select('*').eq('user_id', ME.id)
+    .order('created_at', { ascending: false });
+  if (error) { grid.innerHTML = '<div class="empty-state">Could not load images.</div>'; return; }
+  if (!data?.length) { grid.innerHTML = '<div class="empty-state">No images yet.<br>Use <strong>Imagine</strong> mode to create some!</div>'; return; }
+  document.getElementById('img-panel-counter').textContent = `${data.length} image${data.length!==1?'s':''}`;
+  grid.innerHTML = '';
+  data.forEach(img => {
+    const card = document.createElement('div');
+    card.className = 'img-card';
+
+    const imgEl = document.createElement('img');
+    imgEl.src = img.url;
+    imgEl.alt = img.prompt;
+    imgEl.className = 'img-card-img';
+    imgEl.onclick = () => window.open(img.url, '_blank');
+
+    const info = document.createElement('div');
+    info.className = 'img-card-info';
+
+    const prompt = document.createElement('div');
+    prompt.className = 'img-card-prompt';
+    prompt.textContent = img.prompt;
+
+    const date = document.createElement('div');
+    date.className = 'img-card-date';
+    date.textContent = new Date(img.created_at).toLocaleDateString('en-AU', {day:'numeric',month:'short',year:'numeric'});
+
+    const btns = document.createElement('div');
+    btns.className = 'img-card-btns';
+
+    const dl = document.createElement('button');
+    dl.className = 'img-card-btn';
+    dl.textContent = '⬇️ Download';
+    dl.onclick = (e) => { e.stopPropagation(); downloadImage(img.url, img.prompt); };
+
+    const edit = document.createElement('button');
+    edit.className = 'img-card-btn';
+    edit.textContent = '✏️ Edit';
+    edit.onclick = (e) => { e.stopPropagation(); openEditImage(img.url, img.prompt); };
+
+    const del = document.createElement('button');
+    del.className = 'img-card-btn danger';
+    del.textContent = '🗑️';
+    del.title = 'Delete';
+    del.onclick = (e) => { e.stopPropagation(); deleteImage(img.id, img.url, card); };
+
+    btns.appendChild(dl);
+    btns.appendChild(edit);
+    btns.appendChild(del);
+    info.appendChild(prompt);
+    info.appendChild(date);
+    info.appendChild(btns);
+    card.appendChild(imgEl);
+    card.appendChild(info);
+    grid.appendChild(card);
+  });
+}
+
+async function deleteImage(id, url, cardEl) {
+  if (!confirm('Delete this image?')) return;
+  await SB.from('generated_images').delete().eq('id', id);
+  // Also delete from storage
+  const path = url.split('/generated-images/')[1];
+  if (path) await SB.storage.from('generated-images').remove([path]);
+  cardEl.remove();
+  showToast('Image deleted');
+}
+
+function downloadImage(src, prompt) {
+  const a = document.createElement('a');
+  a.href = src;
+  a.download = (prompt || 'nova-image').slice(0,40).replace(/[^a-z0-9]/gi,'_') + '.jpg';
+  // For cross-origin URLs, fetch first
+  if (src.startsWith('http') && !src.startsWith('data:')) {
+    fetch(src)
+      .then(r => r.blob())
+      .then(blob => {
+        a.href = URL.createObjectURL(blob);
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      })
+      .catch(() => { a.click(); }); // fallback: open in new tab
+  } else {
+    a.click();
+  }
+}
+
+function openEditImage(src, prompt) {
+  document.getElementById('edit-img-src').src = src;
+  document.getElementById('edit-img-prompt').value = prompt || '';
+  document.getElementById('edit-image-modal').classList.remove('hidden');
+}
+
+async function regenerateImage() {
+  const prompt = document.getElementById('edit-img-prompt').value.trim();
+  if (!prompt) { showToast('Enter a prompt'); return; }
+  closeModal('edit-image-modal');
+  setMode('imagine');
+  setActiveSection('chats');
+  await doGenerateImage(prompt);
 }
 
 boot();
