@@ -229,16 +229,29 @@ function appendMsg(role, content) {
 }
 
 function appendImgMsg(src) {
-  const el = document.getElementById('messages');
-  el.insertAdjacentHTML('beforeend', `
-    <div class="message ai">
-      <div class="msg-av nova-av">N</div>
-      <div class="msg-body">
-        <img src="${src}" class="msg-image" onclick="window.open(this.src,'_blank')" alt="Generated image"/>
-        <div class="msg-time">${new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div>
-      </div>
-    </div>`);
-  el.scrollTop = el.scrollHeight;
+  // Use DOM methods — never put large base64 into innerHTML (call stack overflow)
+  const container = document.getElementById('messages');
+  const wrap = document.createElement('div');
+  wrap.className = 'message ai';
+  const av = document.createElement('div');
+  av.className = 'msg-av nova-av';
+  av.textContent = 'N';
+  const body = document.createElement('div');
+  body.className = 'msg-body';
+  const img = document.createElement('img');
+  img.className = 'msg-image';
+  img.alt = 'Generated image';
+  img.onclick = function() { window.open(src, '_blank'); };
+  img.src = src;
+  const time = document.createElement('div');
+  time.className = 'msg-time';
+  time.textContent = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+  body.appendChild(img);
+  body.appendChild(time);
+  wrap.appendChild(av);
+  wrap.appendChild(body);
+  container.appendChild(wrap);
+  container.scrollTop = container.scrollHeight;
 }
 
 // ── Typing indicator ───────────────────────────────────────
@@ -362,7 +375,11 @@ function buildSysPrompt() {
 async function createChat(firstMsg) {
   const title = (firstMsg || 'New Chat').slice(0, 50);
   const { data, error } = await SB.from('ai_chats').insert({ user_id: ME.id, title, last_message: '' }).select().single();
-  if (error || !data) { console.error('createChat error:', error); return false; }
+  if (error || !data) {
+    console.error('createChat error:', error);
+    showToast('DB error: ' + (error?.message || 'Could not create chat. Check Supabase RLS.'), 'error');
+    return false;
+  }
   CURRENT_CHAT_ID = data.id;
   CHAT_MESSAGES[data.id] = [];
   CHATS.unshift(data);
