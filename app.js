@@ -532,9 +532,10 @@ async function doGenerateImage(prompt) {
       return;
     }
     if (data.error) { showToast(data.error, 'error'); return; }
-    // Use persistent URL if available, else base64
-    const displaySrc = data.url || data.image;
-    appendImgMsg(displaySrc, prompt, data.imgId);
+    // Use URL if storage worked, else base64 fallback
+    const imgSrc = data.url || data.image;
+    if (!imgSrc) { showToast('Image returned no displayable content', 'error'); return; }
+    appendImgMsg(imgSrc, prompt, data.imgId);
     DAILY_IMGS = data._dailyImgs ?? (DAILY_IMGS + 1);
     refreshImgCounter();
   } catch(e) { clearTimeout(t); hideTyping(); setLoading(false); showToast('Image generation failed', 'error'); }
