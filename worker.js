@@ -198,7 +198,51 @@ export default {
           imgs_reset_at: imgReset < todayMidnight ? now.toISOString() : profile.imgs_reset_at
         });
 
-        return json({ image: `data:image/jpeg;base64,${base64}`, _dailyImgs: dailyImgs + 1, limit: IMG_LIMIT });
+        // Upload to Supabase Storage so image persists
+        const imgId = crypto.randomUUID();
+        const storagePath = `${user.id}/${imgId}.jpg`;
+        const uploadRes = await fetch(`${env.SUPABASE_URL}/storage/v1/object/generated-images/${storagePath}`, {
+          method: 'POST',
+          headers: {
+            'apikey': env.SUPABASE_SERVICE_KEY,
+            'Authorization': `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+            'Content-Type': 'image/jpeg',
+            'x-upsert': 'true'
+          },
+          body: imgBytes
+        });
+
+        let publicUrl = null;
+        if (uploadRes.ok) {
+          publicUrl = `${env.SUPABASE_URL}/storage/v1/object/public/generated-images/${storagePath}`;
+          // Save record to DB
+          await fetch(`${env.SUPABASE_URL}/rest/v1/generated_images`, {
+            method: 'POST',
+            headers: {
+              'apikey': env.SUPABASE_SERVICE_KEY,
+              'Authorization': `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+              'Content-Type': 'application/json',
+              'Prefer': 'return=minimal'
+            },
+            body: JSON.stringify({ id: imgId, user_id: user.id, prompt, url: publicUrl })
+          });
+        }
+
+        // Update image count
+        await patchProfile(user.id, {
+          daily_imgs: dailyImgs + 1,
+          imgs_reset_at: imgReset < todayMidnight ? now.toISOString() : profile.imgs_reset_at
+        });
+
+        // Return both base64 (for immediate display) and persistent URL
+        return json({
+          image: `data:image/jpeg;base64,${base64}`,
+          url: publicUrl,
+          imgId,
+          prompt,
+          _dailyImgs: dailyImgs + 1,
+          limit: IMG_LIMIT
+        });
       } catch (err) {
         return json({ error: err.message }, 500);
       }
