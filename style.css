@@ -355,3 +355,33 @@ html,body{height:100%;overflow:hidden;font-family:'Inter',system-ui,sans-serif;f
   .mode-btn{font-size:10px;padding:4px 7px}
   .auth-card{padding:24px 18px}
 }
+
+/* ── Images Panel ─────────────────────────────────────────── */
+.images-grid {
+  flex: 1; overflow-y: auto; padding: 16px;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px; align-content: start;
+}
+.img-card {
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 12px;
+  overflow: hidden; transition: .15s; cursor: pointer;
+}
+.img-card:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: var(--shadow); }
+.img-card-img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
+.img-card-info { padding: 12px 14px; }
+.img-card-prompt { font-size: 13px; color: var(--text); font-weight: 500; margin-bottom: 4px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.img-card-date { font-size: 11px; color: var(--text3); margin-bottom: 10px; }
+.img-card-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+.img-card-btn { padding: 5px 10px; border-radius: 7px; font-size: 12px; font-weight: 500; cursor: pointer; border: 1px solid var(--border); background: var(--bg3); color: var(--text2); transition: .15s; }
+.img-card-btn:hover { background: var(--accent-bg); color: var(--accent2); border-color: var(--accent); }
+.img-card-btn.danger:hover { background: var(--danger-bg); color: var(--danger-text); border-color: var(--danger); }
+
+/* Image message action buttons */
+.img-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.img-action-btn { padding: 6px 12px; border-radius: 7px; font-size: 12px; font-weight: 500; cursor: pointer; border: 1px solid var(--border); background: var(--bg3); color: var(--text2); transition: .15s; }
+.img-action-btn:hover { background: var(--accent-bg); color: var(--accent2); border-color: var(--accent); }
+
+@media(max-width:768px) {
+  .images-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; padding: 10px; }
+  .img-card-info { padding: 8px 10px; }
+}
