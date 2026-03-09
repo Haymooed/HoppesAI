@@ -607,3 +607,14 @@ html,body{height:100%;overflow:hidden;font-family:'Inter',system-ui,sans-serif;f
 .update-card-body.md-body li { margin:3px 0; font-size:14px; color:var(--text2); line-height:1.6; }
 .update-card-body.md-body strong { color:var(--text); font-weight:600; }
 .update-card-body.md-body p { margin:6px 0; font-size:14px; color:var(--text2); line-height:1.6; }
+
+/* ── Mod Logs ─────────────────────────────────────────────── */
+.mod-log-row { background:var(--bg3); border:1px solid var(--border); border-radius:9px; padding:10px 14px; margin-bottom:6px; }
+.mod-log-left { display:flex; align-items:center; gap:8px; margin-bottom:5px; flex-wrap:wrap; }
+.mod-log-type { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; padding:2px 8px; border-radius:5px; }
+.mod-log-type.chat { background:#f59e0b20; color:#f59e0b; border:1px solid #f59e0b40; }
+.mod-log-type.image { background:#ef444420; color:#ef4444; border:1px solid #ef444440; }
+.mod-log-type.builder { background:#8b5cf620; color:#8b5cf6; border:1px solid #8b5cf640; }
+.mod-log-user { font-size:13px; font-weight:600; color:var(--text); }
+.mod-log-time { font-size:11px; color:var(--text3); margin-left:auto; }
+.mod-log-content { font-size:12px; color:var(--text3); font-style:italic; word-break:break-word; }
