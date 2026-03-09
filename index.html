@@ -614,6 +614,30 @@
 
 <div id="toast" class="toast hidden"></div>
 
+<!-- Gen Bot Avatar Modal -->
+<div id="gen-bot-avatar-modal" class="overlay hidden" onclick="if(event.target===this)closeModal('gen-bot-avatar-modal')">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-head">
+      <h3>✨ AI Generate Bot Avatar</h3>
+      <button class="modal-x" onclick="closeModal('gen-bot-avatar-modal')">✕</button>
+    </div>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:14px">Describe what you want the Nova AI bot to look like and the AI will generate it.</p>
+    <div class="gen-avatar-suggestions">
+      <span class="gen-avatar-chip" onclick="document.getElementById('gen-avatar-prompt').value=this.textContent">A glowing purple orb with circuits</span>
+      <span class="gen-avatar-chip" onclick="document.getElementById('gen-avatar-prompt').value=this.textContent">A friendly robot face, minimal, dark theme</span>
+      <span class="gen-avatar-chip" onclick="document.getElementById('gen-avatar-prompt').value=this.textContent">Abstract AI brain, neon blue, circular logo</span>
+      <span class="gen-avatar-chip" onclick="document.getElementById('gen-avatar-prompt').value=this.textContent">Cute anime robot mascot, purple accent</span>
+    </div>
+    <textarea id="gen-avatar-prompt" class="form-input" rows="3" placeholder="e.g. A futuristic AI orb, glowing purple, dark background, circular, logo style…" style="margin-top:10px"></textarea>
+    <div id="gen-avatar-preview" class="gen-avatar-preview-wrap"></div>
+    <div class="modal-foot" style="margin-top:14px">
+      <button class="btn-secondary" onclick="closeModal('gen-bot-avatar-modal')">Cancel</button>
+      <button id="gen-avatar-confirm-btn" class="btn-primary hidden">✅ Use This Avatar</button>
+      <button id="gen-avatar-btn" class="btn-primary" onclick="genBotAvatar()">✨ Generate</button>
+    </div>
+  </div>
+</div>
+
 <!-- Discord join prompt -->
 <div id="discord-join-prompt" class="discord-join-prompt hidden">
   <div class="djp-icon">🎮</div>
