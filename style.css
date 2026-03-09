@@ -599,3 +599,11 @@ html,body{height:100%;overflow:hidden;font-family:'Inter',system-ui,sans-serif;f
 .gen-avatar-chip:hover { background:var(--accent-bg); color:var(--accent2); border-color:var(--accent); }
 .gen-avatar-preview-wrap { min-height:40px; display:flex; justify-content:center; align-items:center; margin:14px 0 0; }
 .gen-avatar-spinner { width:40px; height:40px; border:3px solid var(--bg4); border-top-color:var(--accent); border-radius:50%; animation:spin .8s linear infinite; }
+
+/* ── Markdown in update cards ─────────────────────────────── */
+.update-card-body.md-body h1,.update-card-body.md-body h2 { font-size:16px; font-weight:700; color:var(--text); margin:14px 0 6px; }
+.update-card-body.md-body h3 { font-size:14px; font-weight:700; color:var(--accent2); margin:12px 0 4px; }
+.update-card-body.md-body ul,.update-card-body.md-body ol { padding-left:18px; margin:4px 0 8px; }
+.update-card-body.md-body li { margin:3px 0; font-size:14px; color:var(--text2); line-height:1.6; }
+.update-card-body.md-body strong { color:var(--text); font-weight:600; }
+.update-card-body.md-body p { margin:6px 0; font-size:14px; color:var(--text2); line-height:1.6; }
