@@ -851,7 +851,7 @@ async function loadUpdateLog() {
         ${ME?.is_admin?`<button class="icon-btn" style="color:var(--danger);margin-left:auto" onclick="deleteUpdate('${u.id}')">✕</button>`:''}
       </div>
       <div class="update-card-meta">By ${esc(u.profiles?.display_name||'Admin')} · ${new Date(u.created_at).toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'})}</div>
-      <div class="update-card-body">${esc(u.content)}</div>
+      <div class="update-card-body md-body">${mdRender(u.content)}</div>
     </div>`).join('');
 }
 
