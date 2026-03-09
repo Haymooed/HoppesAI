@@ -453,6 +453,7 @@
       <button class="admin-tab" data-tab="banner" onclick="switchAdminTab('banner')">📢 Banner</button>
       <button class="admin-tab" data-tab="users" onclick="switchAdminTab('users')">👥 Users</button>
       <button class="admin-tab" data-tab="bot" onclick="switchAdminTab('bot')">🤖 Bot</button>
+      <button class="admin-tab" data-tab="mod" onclick="switchAdminTab('mod')">🛡 Mod Logs</button>
     </div>
 
     <!-- Site Controls -->
@@ -469,6 +470,16 @@
     <!-- Banner -->
     <div id="admin-pane-banner" class="admin-pane">
       <div id="admin-banner-inner"></div>
+    </div>
+
+    <!-- Moderation Logs -->
+    <div id="admin-pane-mod" class="admin-pane">
+      <div class="admin-section-label">🛡 Content Violation Log</div>
+      <div class="admin-sub-text">All blocked requests are logged here with the user and content.</div>
+      <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+        <button class="btn-secondary sm" onclick="loadAdminModLogs()">↻ Refresh</button>
+      </div>
+      <div id="admin-mod-logs"></div>
     </div>
 
     <!-- Bot Profile -->
