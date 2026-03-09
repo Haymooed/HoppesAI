@@ -160,8 +160,9 @@ export default {
 
         // Limits: use profile override, else global config, else default
         const globalMsgLimit = parseInt(cfg.global_msg_limit || '50');
-        const userMsgLimit = profile.custom_msg_limit != null ? profile.custom_msg_limit : globalMsgLimit;
-        const LIMIT = profile.tier === 'pro' ? 999 : userMsgLimit;
+        const globalMsgLimitPro = parseInt(cfg.global_msg_limit_pro || '200');
+        const LIMIT = profile.custom_msg_limit != null ? profile.custom_msg_limit
+          : (profile.tier === 'pro' ? globalMsgLimitPro : globalMsgLimit);
 
         if (dailyMsgs >= LIMIT) {
           const midnight = new Date(todayMidnight.getTime() + 86400000);
@@ -249,7 +250,11 @@ export default {
         const now = new Date();
         const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         const imgReset = new Date(profile.imgs_reset_at || 0);
-        let dailyImgs = imgReset < todayMidnight ? 0 : (profile.daily_imgs || 0);
+        let dailyImgs = profile.daily_imgs || 0;
+        if (imgReset < todayMidnight) {
+          dailyImgs = 0;
+          await patchProfile(user.id, { daily_imgs: 0, imgs_reset_at: now.toISOString() });
+        }
 
         // Limits
         const globalImgLimit = parseInt(cfg.global_img_limit_free || '3');
@@ -342,10 +347,7 @@ export default {
           });
         }
 
-        await patchProfile(user.id, {
-          daily_imgs: dailyImgs + 1,
-          imgs_reset_at: imgReset < todayMidnight ? now.toISOString() : profile.imgs_reset_at
-        });
+        await patchProfile(user.id, { daily_imgs: dailyImgs + 1 });
 
         // If storage worked, return just the URL (tiny response)
         // If not, return the image as raw binary — NOT base64 JSON (avoids size/corruption issues)
@@ -403,6 +405,56 @@ export default {
           headers: { 'apikey': env.SUPABASE_SERVICE_KEY, 'Authorization': `Bearer ${env.SUPABASE_SERVICE_KEY}` }
         });
         return new Response(await r.text(), { status: r.status, headers: { 'Content-Type': 'application/json', ...cors } });
+      } catch(err) { return json({ error: err.message }, 500); }
+    }
+
+    // ── POST /api/kofi-webhook ───────────────────────────────
+    // Ko-fi sends a POST with form data when a payment is made
+    if (url.pathname === '/api/kofi-webhook' && request.method === 'POST') {
+      try {
+        const formData = await request.formData();
+        const raw = formData.get('data');
+        if (!raw) return json({ ok: false }, 400);
+        const data = JSON.parse(raw);
+
+        // Verify Ko-fi token
+        const kofiToken = env.KOFI_WEBHOOK_TOKEN;
+        if (kofiToken && data.verification_token !== kofiToken) {
+          return json({ error: 'Invalid token' }, 403);
+        }
+
+        const email = data.email?.toLowerCase();
+        const amount = parseFloat(data.amount || '0');
+        const type = data.type; // 'Donation', 'Subscription', 'Shop Order'
+
+        if (!email) return json({ ok: true }); // no email, skip
+
+        // Find user by email in auth
+        const usersRes = await fetch(`${env.SUPABASE_URL}/auth/v1/admin/users?email=${encodeURIComponent(email)}`, {
+          headers: { 'apikey': env.SUPABASE_SERVICE_KEY, 'Authorization': `Bearer ${env.SUPABASE_SERVICE_KEY}` }
+        });
+        const usersData = await usersRes.json();
+        const matchedUser = usersData?.users?.[0];
+
+        if (matchedUser) {
+          // Upgrade to pro
+          await patchProfile(matchedUser.id, { tier: 'pro' });
+          // Log it
+          await fetch(`${env.SUPABASE_URL}/rest/v1/kofi_payments`, {
+            method: 'POST',
+            headers: {
+              'apikey': env.SUPABASE_SERVICE_KEY, 'Authorization': `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+              'Content-Type': 'application/json', 'Prefer': 'return=minimal'
+            },
+            body: JSON.stringify({
+              user_id: matchedUser.id, email, amount, type,
+              kofi_transaction_id: data.kofi_transaction_id,
+              message: data.message || null,
+              created_at: new Date().toISOString()
+            })
+          });
+        }
+        return json({ ok: true });
       } catch(err) { return json({ error: err.message }, 500); }
     }
 
@@ -714,6 +766,52 @@ export default {
 
         return json({ url: publicUrl });
       } catch(err) { return json({ error: err.message }, 500); }
+    }
+
+    // ── POST /api/kofi-webhook ───────────────────────────────
+    if (url.pathname === '/api/kofi-webhook' && request.method === 'POST') {
+      try {
+        const formData = await request.formData();
+        const raw = formData.get('data');
+        if (!raw) return json({ ok: false }, 400);
+        const data = JSON.parse(raw);
+        // Verify token
+        if (env.KOFI_WEBHOOK_TOKEN && data.verification_token !== env.KOFI_WEBHOOK_TOKEN)
+          return json({ error: 'Invalid token' }, 403);
+        const email = data.email?.toLowerCase();
+        if (!email) return json({ ok: true });
+        // Find user by email
+        const usersRes = await fetch(`${env.SUPABASE_URL}/auth/v1/admin/users?page=1&per_page=1000`, {
+          headers: { 'apikey': env.SUPABASE_SERVICE_KEY, 'Authorization': `Bearer ${env.SUPABASE_SERVICE_KEY}` }
+        });
+        const usersData = await usersRes.json();
+        const matchedUser = usersData?.users?.find(u => u.email?.toLowerCase() === email);
+        if (matchedUser) {
+          await patchProfile(matchedUser.id, { tier: 'pro' });
+          await fetch(`${env.SUPABASE_URL}/rest/v1/kofi_payments`, {
+            method: 'POST',
+            headers: { 'apikey': env.SUPABASE_SERVICE_KEY, 'Authorization': `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+              'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+            body: JSON.stringify({ user_id: matchedUser.id, email, amount: parseFloat(data.amount||0),
+              type: data.type||'Donation', kofi_transaction_id: data.kofi_transaction_id||null,
+              message: data.message||null, created_at: new Date().toISOString() })
+          });
+        }
+        return json({ ok: true });
+      } catch(err) { return json({ error: err.message }, 500); }
+    }
+
+    // ── GET /api/admin/kofi-payments ─────────────────────────
+    if (url.pathname === '/api/admin/kofi-payments' && request.method === 'GET') {
+      const token = request.headers.get('X-User-Token');
+      const user = await getUser(token);
+      const admin = await getProfile(user?.id);
+      if (!admin?.is_admin) return json({ error: 'Forbidden' }, 403);
+      const r = await fetch(`${env.SUPABASE_URL}/rest/v1/kofi_payments?order=created_at.desc&limit=50&select=*`, {
+        headers: { 'apikey': env.SUPABASE_SERVICE_KEY, 'Authorization': `Bearer ${env.SUPABASE_SERVICE_KEY}` }
+      });
+      const data = await r.json();
+      return json(Array.isArray(data) ? data : []);
     }
 
     // ── Static assets ────────────────────────────────────────

@@ -50,7 +50,11 @@ async function initApp(session) {
   const { data: prof } = await SB.from('profiles').select('*').eq('id', session.user.id).single();
   ME = prof || { id: session.user.id, display_name: session.user.email?.split('@')[0] || 'User', tier: 'free', avatar_color: COLORS[0] };
   DAILY_IMGS = ME.daily_imgs || 0;
-  IMG_LIMIT = ME.tier === 'pro' ? 10 : 3;
+  // Use admin-configured limits if available, else sensible defaults
+  const cfgImgLimitFree = parseInt(window._adminCfgCache?.global_img_limit_free || '3');
+  const cfgImgLimitPro = parseInt(window._adminCfgCache?.global_img_limit_pro || '10');
+  IMG_LIMIT = ME.custom_img_limit != null ? ME.custom_img_limit
+    : (ME.tier === 'pro' ? cfgImgLimitPro : cfgImgLimitFree);
   document.getElementById('auth-screen').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   renderSidebarUser();
@@ -67,11 +71,20 @@ async function loadBotProfile() {
   try {
     const res = await fetch('/api/site-status');
     const d = await res.json();
+    // Cache config for client-side limit calculations
+    window._adminCfgCache = d;
     if (d.bot_name || d.bot_color || d.bot_avatar_url) {
       ADMIN_CFG.bot_name = d.bot_name;
       ADMIN_CFG.bot_color = d.bot_color;
       ADMIN_CFG.bot_avatar_url = d.bot_avatar_url;
       applyBotProfile();
+    }
+    // Show Go Pro button if Ko-fi URL is set
+    if (d.kofi_url) {
+      document.querySelectorAll('.go-pro-btn').forEach(el => {
+        el.classList.remove('hidden');
+        el.onclick = () => window.open(d.kofi_url, '_blank');
+      });
     }
   } catch(_) {}
 }
@@ -231,6 +244,12 @@ function renderSidebarUser() {
   const tb = document.getElementById('sidebar-tier');
   tb.textContent = ME.tier === 'pro' ? '⭐ Pro' : 'Free';
   tb.className = 'tier-badge ' + (ME.tier === 'pro' ? 'pro' : 'free');
+  // Go Pro button: only show for free users once Ko-fi URL is known
+  if (ME.tier !== 'pro' && window._adminCfgCache?.kofi_url) {
+    document.querySelectorAll('.go-pro-btn').forEach(el => el.classList.remove('hidden'));
+  } else {
+    document.querySelectorAll('.go-pro-btn').forEach(el => el.classList.add('hidden'));
+  }
   setAvatar(document.getElementById('sidebar-avatar'), ME);
   refreshMsgBar(DAILY_MSGS);
   refreshImgCounter();
@@ -636,7 +655,16 @@ function enableWebSearch() { setMode('search'); }
 // ── Image gen ──────────────────────────────────────────────
 async function doGenerateImage(prompt) {
   if (!prompt) { showToast('Describe the image first'); return; }
-  if (DAILY_IMGS >= IMG_LIMIT) { document.getElementById('img-limit-modal').classList.remove('hidden'); return; }
+  if (DAILY_IMGS >= IMG_LIMIT) {
+    // Calculate time until midnight reset
+    const now = new Date();
+    const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    const ms = midnight - now;
+    const hrs = Math.floor(ms / 3600000), mins = Math.floor((ms % 3600000) / 60000);
+    document.getElementById('img-limit-reset').textContent = `${hrs}h ${mins}m`;
+    document.getElementById('img-limit-modal').classList.remove('hidden');
+    return;
+  }
   appendMsg('user', '🎨 ' + prompt);
   if (!CURRENT_CHAT_ID) { const ok = await createChat('Image: ' + prompt); if (!ok) return; }
   setLoading(true);
@@ -866,6 +894,23 @@ async function loadUpdateLog() {
 
 function openPostUpdate() { document.getElementById('post-update-modal').classList.remove('hidden'); }
 
+function openGoPro() {
+  const url = window._adminCfgCache?.kofi_url;
+  if (url) window.open(url, '_blank');
+  else showToast('Pro upgrade coming soon!');
+}
+
+function openGoPro() {
+  // Check if admin has set a Ko-fi URL
+  fetch('/api/site-status').then(r => r.json()).then(d => {
+    if (d.kofi_url) {
+      window.open(d.kofi_url, '_blank');
+    } else {
+      showToast('Pro upgrade not available yet — check back soon!');
+    }
+  });
+}
+
 async function postUpdate() {
   const title = gv('update-title'), content = gv('update-content'), version = gv('update-version');
   if (!title||!content) { showToast('Title and content required'); return; }
@@ -1083,30 +1128,87 @@ function renderAdminSitePane() {
 function renderAdminLimitsPane() {
   const c = ADMIN_CFG;
   document.getElementById('admin-limits-pane-inner').innerHTML = `
-    <div class="admin-section-label">🌐 Global Limits (applies to all free users unless overridden)</div>
+    <div class="admin-section-label">🆓 Free Tier Limits</div>
     <div class="admin-limit-grid">
       <div class="admin-limit-item">
-        <label>Free msg limit/day</label>
+        <label>Messages / day</label>
         <div style="display:flex;gap:6px">
           <input class="form-input sm" id="g-msg-free" type="number" min="0" max="9999" value="${c.global_msg_limit||50}"/>
-          <button class="btn-secondary sm" onclick="adminSaveGlobalLimit('global_msg_limit','g-msg-free','Message limit saved')">Save</button>
+          <button class="btn-secondary sm" onclick="adminSaveGlobalLimit('global_msg_limit','g-msg-free','Free msg limit saved')">Save</button>
         </div>
       </div>
       <div class="admin-limit-item">
-        <label>Free image limit/day</label>
+        <label>Images / day</label>
         <div style="display:flex;gap:6px">
           <input class="form-input sm" id="g-img-free" type="number" min="0" max="9999" value="${c.global_img_limit_free||3}"/>
-          <button class="btn-secondary sm" onclick="adminSaveGlobalLimit('global_img_limit_free','g-img-free','Image limit saved')">Save</button>
+          <button class="btn-secondary sm" onclick="adminSaveGlobalLimit('global_img_limit_free','g-img-free','Free image limit saved')">Save</button>
+        </div>
+      </div>
+    </div>
+    <div class="admin-section-label" style="margin-top:18px">⭐ Pro Tier Limits</div>
+    <div class="admin-limit-grid">
+      <div class="admin-limit-item">
+        <label>Messages / day</label>
+        <div style="display:flex;gap:6px">
+          <input class="form-input sm" id="g-msg-pro" type="number" min="0" max="9999" value="${c.global_msg_limit_pro||200}"/>
+          <button class="btn-secondary sm" onclick="adminSaveGlobalLimit('global_msg_limit_pro','g-msg-pro','Pro msg limit saved')">Save</button>
         </div>
       </div>
       <div class="admin-limit-item">
-        <label>Pro image limit/day</label>
+        <label>Images / day</label>
         <div style="display:flex;gap:6px">
           <input class="form-input sm" id="g-img-pro" type="number" min="0" max="9999" value="${c.global_img_limit_pro||10}"/>
-          <button class="btn-secondary sm" onclick="adminSaveGlobalLimit('global_img_limit_pro','g-img-pro','Pro limit saved')">Save</button>
+          <button class="btn-secondary sm" onclick="adminSaveGlobalLimit('global_img_limit_pro','g-img-pro','Pro image limit saved')">Save</button>
         </div>
       </div>
+    </div>
+    <div class="admin-section-label" style="margin-top:24px">☕ Ko-fi — Paid Upgrades</div>
+    <div class="admin-sub-text">When a user pays on Ko-fi using their NovaAI account email, they get automatically upgraded to Pro.</div>
+    <div class="kofi-setup-card">
+      <div class="kofi-setup-steps">
+        <div class="kofi-step"><span class="kofi-step-num">1</span><span>Go to <a href="https://ko-fi.com/account/api" target="_blank" class="kofi-link">ko-fi.com/account/api</a> and copy your <strong>Webhook Verification Token</strong></span></div>
+        <div class="kofi-step"><span class="kofi-step-num">2</span><span>In Cloudflare → Workers → NovaAI → Settings → Variables, add:<br/><code class="kofi-code">KOFI_WEBHOOK_TOKEN</code> = (your token)</span></div>
+        <div class="kofi-step"><span class="kofi-step-num">3</span><span>In Ko-fi → Settings → API → Webhook URL, paste:<br/><code class="kofi-code">https://novaai.moodyhayden567.workers.dev/api/kofi-webhook</code></span></div>
+        <div class="kofi-step"><span class="kofi-step-num">4</span><span>Set up a <strong>Membership tier</strong> or one-off donation on Ko-fi. Users must pay with the <strong>same email</strong> as their NovaAI account — they'll be upgraded to Pro automatically.</span></div>
+        <div class="kofi-step"><span class="kofi-step-num">5</span><span>Paste your Ko-fi page URL below — this adds a "Go Pro ⭐" button to the app for users.</span></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:14px;align-items:center">
+        <input class="form-input" id="kofi-url-input" value="${esc(c.kofi_url||'')}" placeholder="https://ko-fi.com/yourpage" style="flex:1"/>
+        <button class="btn-primary sm" onclick="adminSaveKofiUrl()">Save</button>
+      </div>
+      <div style="margin-top:14px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <div class="admin-section-label" style="margin:0">Recent Payments</div>
+          <button class="btn-secondary sm" onclick="loadKofiPayments()">↻ Load</button>
+        </div>
+        <div id="kofi-payments-list"><div class="admin-sub-text">Click Load to view recent Ko-fi payments.</div></div>
+      </div>
     </div>`;
+}
+
+async function adminSaveKofiUrl() {
+  const val = document.getElementById('kofi-url-input')?.value?.trim() || '';
+  await adminSetConfig('kofi_url', val);
+  ADMIN_CFG.kofi_url = val;
+  showToast('Ko-fi URL saved!');
+  renderSidebarUser(); // refresh Go Pro button
+}
+
+async function loadKofiPayments() {
+  const el = document.getElementById('kofi-payments-list');
+  if (!el) return;
+  el.innerHTML = '<div class="admin-sub-text">Loading…</div>';
+  try {
+    const res = await fetch('/api/admin/kofi-payments', { headers: {'X-User-Token': SESSION_TOKEN} });
+    const data = await res.json();
+    if (!Array.isArray(data) || !data.length) { el.innerHTML = '<div class="admin-sub-text">No payments yet.</div>'; return; }
+    el.innerHTML = data.map(p => `
+      <div class="kofi-payment-row">
+        <span class="kofi-payment-type">${esc(p.type||'Payment')}</span>
+        <span class="kofi-payment-info">$${parseFloat(p.amount||0).toFixed(2)} — ${esc(p.email||'')}</span>
+        <span class="kofi-payment-date">${new Date(p.created_at).toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'})}</span>
+      </div>`).join('');
+  } catch(e) { el.innerHTML = '<div class="admin-sub-text" style="color:var(--danger-text)">Could not load payments.</div>'; }
 }
 
 function renderAdminBannerPane() {

@@ -618,3 +618,19 @@ html,body{height:100%;overflow:hidden;font-family:'Inter',system-ui,sans-serif;f
 .mod-log-user { font-size:13px; font-weight:600; color:var(--text); }
 .mod-log-time { font-size:11px; color:var(--text3); margin-left:auto; }
 .mod-log-content { font-size:12px; color:var(--text3); font-style:italic; word-break:break-word; }
+
+/* ── Ko-fi Admin Panel ────────────────────────────────────── */
+.kofi-setup-card { background:var(--bg3); border:1px solid var(--border); border-radius:12px; padding:16px; margin-top:8px; }
+.kofi-setup-steps { display:flex; flex-direction:column; gap:10px; }
+.kofi-step { display:flex; gap:10px; align-items:flex-start; font-size:13px; color:var(--text2); line-height:1.5; }
+.kofi-step-num { min-width:22px; height:22px; background:var(--accent); color:#fff; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; flex-shrink:0; margin-top:1px; }
+.kofi-link { color:var(--accent2); text-decoration:underline; }
+.kofi-code { background:var(--bg4); border:1px solid var(--border); border-radius:5px; padding:2px 7px; font-family:monospace; font-size:12px; color:var(--text); word-break:break-all; }
+.kofi-payment-row { display:flex; align-items:center; gap:8px; padding:7px 10px; background:var(--bg4); border-radius:8px; margin-bottom:4px; }
+.kofi-payment-type { font-size:11px; font-weight:700; background:#10b98120; color:#10b981; border:1px solid #10b98140; border-radius:5px; padding:1px 7px; white-space:nowrap; }
+.kofi-payment-info { font-size:13px; color:var(--text); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.kofi-payment-date { font-size:11px; color:var(--text3); white-space:nowrap; }
+
+/* ── Go Pro button ────────────────────────────────────────── */
+.go-pro-btn { background:linear-gradient(135deg,#f59e0b,#d97706); color:#fff; border:none; border-radius:6px; padding:2px 8px; font-size:11px; font-weight:700; cursor:pointer; transition:.15s; white-space:nowrap; }
+.go-pro-btn:hover { opacity:.85; transform:scale(1.04); }
