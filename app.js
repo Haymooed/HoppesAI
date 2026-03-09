@@ -45,6 +45,7 @@ async function boot() {
 }
 
 async function initApp(session) {
+  handleOAuthCallback();
   SESSION_TOKEN = session.access_token;
   const { data: prof } = await SB.from('profiles').select('*').eq('id', session.user.id).single();
   ME = prof || { id: session.user.id, display_name: session.user.email?.split('@')[0] || 'User', tier: 'free', avatar_color: COLORS[0] };
@@ -59,6 +60,20 @@ async function initApp(session) {
   loadUpdateLog();
   setActiveSection('chats');
   checkSiteStatus();
+  loadBotProfile();
+}
+
+async function loadBotProfile() {
+  try {
+    const res = await fetch('/api/site-status');
+    const d = await res.json();
+    if (d.bot_name || d.bot_color || d.bot_avatar_url) {
+      ADMIN_CFG.bot_name = d.bot_name;
+      ADMIN_CFG.bot_color = d.bot_color;
+      ADMIN_CFG.bot_avatar_url = d.bot_avatar_url;
+      applyBotProfile();
+    }
+  } catch(_) {}
 }
 
 function showAuth() {
@@ -85,11 +100,103 @@ async function doLogin() {
 }
 
 async function doGithubLogin() {
+  setOAuthLoading('github', true);
   const { error } = await SB.auth.signInWithOAuth({
     provider: 'github',
-    options: { redirectTo: window.location.origin }
+    options: { redirectTo: window.location.origin + '?oauth=github' }
   });
-  if (error) authErr(error.message);
+  if (error) { setOAuthLoading('github', false); authErr(error.message); }
+}
+
+async function doDiscordLogin() {
+  setOAuthLoading('discord', true);
+  const { error } = await SB.auth.signInWithOAuth({
+    provider: 'discord',
+    options: { redirectTo: window.location.origin + '?oauth=discord' }
+  });
+  if (error) { setOAuthLoading('discord', false); authErr(error.message); }
+}
+
+function setOAuthLoading(provider, loading) {
+  const btn = document.getElementById('oauth-btn-' + provider);
+  if (!btn) return;
+  if (loading) {
+    btn.dataset.orig = btn.innerHTML;
+    btn.innerHTML = '<span class="oauth-spinner"></span> Connecting…';
+    btn.disabled = true;
+  } else {
+    btn.innerHTML = btn.dataset.orig || btn.innerHTML;
+    btn.disabled = false;
+  }
+}
+
+async function linkProvider(provider) {
+  const { error } = await SB.auth.linkIdentity({ provider });
+  if (error) showToast('Could not link ' + provider + ': ' + error.message, 'error');
+  else showToast('Account linked to ' + provider + '!');
+}
+
+async function unlinkProvider(provider) {
+  // Get identities
+  const { data: { user } } = await SB.auth.getUser();
+  const identity = user?.identities?.find(i => i.provider === provider);
+  if (!identity) return showToast('Not linked to ' + provider);
+  if (user.identities.length <= 1) return showToast('Cannot unlink your only sign-in method', 'error');
+  const { error } = await SB.auth.unlinkIdentity(identity);
+  if (error) showToast('Unlink failed: ' + error.message, 'error');
+  else { showToast('Unlinked from ' + provider); loadConnectedAccounts(); }
+}
+
+async function loadConnectedAccounts() {
+  const el = document.getElementById('connected-accounts');
+  if (!el) return;
+  const { data: { user } } = await SB.auth.getUser();
+  const identities = user?.identities || [];
+  const providers = ['github','discord','email'];
+  el.innerHTML = providers.map(p => {
+    const linked = identities.find(i => i.provider === p);
+    const icons = { github:'🐙', discord:'🎮', email:'✉️' };
+    const labels = { github:'GitHub', discord:'Discord', email:'Email' };
+    return `<div class="connector-row">
+      <span class="connector-icon">${icons[p]}</span>
+      <span class="connector-label">${labels[p]}</span>
+      ${linked
+        ? `<span class="connector-badge linked">Connected</span>
+           ${identities.length > 1 ? `<button class="connector-unlink" onclick="unlinkProvider('${p}')">Unlink</button>` : ''}`
+        : `<button class="connector-link" onclick="linkProvider('${p}')">Connect</button>`
+      }
+    </div>`;
+  }).join('');
+}
+
+// Auto-join Discord server after OAuth (if configured by admin)
+async function handleOAuthCallback() {
+  const params = new URLSearchParams(window.location.search);
+  const oauth = params.get('oauth');
+  if (!oauth) return;
+  // Clean URL
+  window.history.replaceState({}, '', window.location.pathname);
+  if (oauth === 'github' || oauth === 'discord') {
+    // Check if admin has set a Discord invite link
+    try {
+      const res = await fetch('/api/site-status');
+      const cfg = await res.json();
+      if (cfg.discord_invite) {
+        setTimeout(() => {
+          showDiscordJoinPrompt(cfg.discord_invite, cfg.discord_server_name || 'our Discord server');
+        }, 1500);
+      }
+    } catch(_) {}
+  }
+}
+
+function showDiscordJoinPrompt(inviteUrl, serverName) {
+  const el = document.getElementById('discord-join-prompt');
+  if (!el) return;
+  document.getElementById('discord-join-server-name').textContent = serverName;
+  document.getElementById('discord-join-link').href = inviteUrl;
+  el.classList.remove('hidden');
+  setTimeout(() => el.classList.add('hidden'), 12000);
 }
 
 async function doRegister() {
@@ -815,6 +922,7 @@ function applySettings() { applyTheme(SETTINGS.theme||'dark'); applyFontSize(SET
 
 function openSettings() {
   document.getElementById('settings-modal').classList.remove('hidden');
+  loadConnectedAccounts();
   if (ME?.is_admin) document.getElementById('settings-admin-tab').classList.remove('hidden');
   switchSettings('appearance');
   markSeg('theme', SETTINGS.theme||'dark'); markSeg('fs', SETTINGS.fontSize||'md');
@@ -840,6 +948,11 @@ function setStyle(s) { saveSetting('style',s); markSeg('style',s); }
 function applyTheme(t) { document.documentElement.setAttribute('data-theme',t); }
 function applyFontSize(f) { document.documentElement.setAttribute('data-fs',f); }
 function applyDensity(d) { document.documentElement.setAttribute('data-density',d); }
+
+async function openConnectedAccounts() {
+  document.getElementById('settings-connectors').classList.remove('hidden');
+  loadConnectedAccounts();
+}
 
 async function changePassword() {
   const p = gv('new-password'); if (!p||p.length<6) { showToast('Must be 6+ chars'); return; }
@@ -908,6 +1021,7 @@ async function loadAdminConfig() {
   renderAdminSitePane();
   renderAdminLimitsPane();
   renderAdminBannerPane();
+  renderAdminBotPane();
 }
 
 function renderAdminSitePane() {
@@ -1002,6 +1116,116 @@ function renderAdminBannerPane() {
       <button class="btn-primary sm" onclick="adminSaveBanner()">Set Banner</button>
       ${hasBanner ? '<button class="btn-danger sm" onclick="adminClearBanner()">Clear Banner</button>' : ''}
     </div>`;
+}
+
+function renderAdminBotPane() {
+  const c = ADMIN_CFG;
+  CURRENT_BOT_COLOR = c.bot_color || '#7c3aed';
+  const avatarHtml = c.bot_avatar_url
+    ? `<img src="${c.bot_avatar_url}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`
+    : (c.bot_name||'N')[0].toUpperCase();
+  document.getElementById('admin-bot-inner').innerHTML = `
+    <div class="admin-section-label">🤖 Nova AI Bot Profile</div>
+    <div class="admin-sub-text">Customise how the AI appears in chats.</div>
+    <div class="bot-profile-editor">
+      <div class="bot-avatar-wrap">
+        <div id="bot-avatar-preview" class="bot-avatar-preview" style="background:${c.bot_color||'#7c3aed'};color:#fff;font-size:28px;font-weight:700;display:flex;align-items:center;justify-content:center">${avatarHtml}</div>
+        <input type="file" id="bot-avatar-upload" accept="image/*" style="display:none" onchange="uploadBotAvatar(event)"/>
+        <button class="btn-secondary sm" style="margin-top:8px" onclick="document.getElementById('bot-avatar-upload').click()">Upload Avatar</button>
+      </div>
+      <div class="bot-fields">
+        <label class="form-label">Bot Name</label>
+        <input class="form-input" id="bot-name-input" value="${esc(c.bot_name||'Nova')}" placeholder="Nova"/>
+        <label class="form-label" style="margin-top:10px">Avatar Colour</label>
+        <div class="bot-color-row">
+          ${['#7c3aed','#2563eb','#059669','#dc2626','#d97706','#db2777','#0891b2'].map(col =>
+            `<button class="bot-color-dot ${(c.bot_color||'#7c3aed')===col?'active':''}" style="background:${col}" onclick="selectBotColor('${col}')"></button>`
+          ).join('')}
+        </div>
+        <label class="form-label" style="margin-top:10px">Tagline</label>
+        <input class="form-input" id="bot-tagline-input" value="${esc(c.bot_tagline||'Your AI assistant')}" placeholder="Your AI assistant"/>
+        <button class="btn-primary" style="margin-top:12px;width:100%" onclick="saveBotProfile()">💾 Save Bot Profile</button>
+      </div>
+    </div>
+    <div class="admin-section-label" style="margin-top:24px">🎮 Discord Integration</div>
+    <div class="admin-sub-text">Users who sign in via GitHub or Discord will be prompted to join your server.</div>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <input class="form-input" id="discord-invite-input" value="${esc(c.discord_invite||'')}" placeholder="https://discord.gg/yourserver" style="flex:1"/>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <input class="form-input sm" id="discord-server-name-input" value="${esc(c.discord_server_name||'')}" placeholder="Server display name e.g. NovaAI Community" style="flex:1"/>
+      <button class="btn-primary sm" onclick="adminSaveDiscordInvite()">Save</button>
+    </div>`;
+}
+
+let CURRENT_BOT_COLOR = '#7c3aed';
+
+function selectBotColor(color) {
+  CURRENT_BOT_COLOR = color;
+  document.querySelectorAll('.bot-color-dot').forEach(el => {
+    el.classList.toggle('active', el.style.background === color || el.style.backgroundColor === color);
+  });
+  const prev = document.getElementById('bot-avatar-preview');
+  if (prev) prev.style.background = color;
+}
+
+async function uploadBotAvatar(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  if (file.size > 2*1024*1024) return showToast('Max 2MB', 'error');
+  const ext = file.name.split('.').pop();
+  const path = 'bot-avatar/' + Date.now() + '.' + ext;
+  const { error } = await SB.storage.from('generated-images').upload(path, file, { upsert: true });
+  if (error) return showToast('Upload failed: ' + error.message, 'error');
+  const url = SB.storage.from('generated-images').getPublicUrl(path).data.publicUrl;
+  await adminSetConfig('bot_avatar_url', url);
+  document.getElementById('bot-avatar-preview').innerHTML = `<img src="${url}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`;
+  showToast('Avatar uploaded!');
+}
+
+async function saveBotProfile() {
+  const name = document.getElementById('bot-name-input')?.value?.trim() || 'Nova';
+  const tagline = document.getElementById('bot-tagline-input')?.value?.trim() || 'Your AI assistant';
+  await fetch('/api/admin/set-config', {
+    method:'POST', headers:{'Content-Type':'application/json','X-User-Token':SESSION_TOKEN},
+    body: JSON.stringify({ updates: [
+      {key:'bot_name', value:name},
+      {key:'bot_color', value:CURRENT_BOT_COLOR},
+      {key:'bot_tagline', value:tagline}
+    ]})
+  });
+  showToast('Bot profile saved!');
+  await loadAdminConfig();
+  applyBotProfile();
+}
+
+async function adminSaveDiscordInvite() {
+  const invite = document.getElementById('discord-invite-input')?.value?.trim() || '';
+  const name = document.getElementById('discord-server-name-input')?.value?.trim() || '';
+  await fetch('/api/admin/set-config', {
+    method:'POST', headers:{'Content-Type':'application/json','X-User-Token':SESSION_TOKEN},
+    body: JSON.stringify({ updates: [{key:'discord_invite',value:invite},{key:'discord_server_name',value:name}]})
+  });
+  showToast('Discord invite saved!');
+}
+
+function applyBotProfile() {
+  const name = ADMIN_CFG.bot_name || 'Nova';
+  const color = ADMIN_CFG.bot_color || '#7c3aed';
+  const avatarUrl = ADMIN_CFG.bot_avatar_url || '';
+  document.querySelectorAll('.nova-av').forEach(el => {
+    if (avatarUrl) {
+      el.style.background = `url(${avatarUrl}) center/cover`;
+      el.textContent = '';
+    } else {
+      el.style.background = color;
+      el.style.backgroundImage = '';
+      el.textContent = name[0].toUpperCase();
+    }
+  });
+  // Update welcome logo initial
+  const wl = document.querySelector('.welcome-logo');
+  if (wl) wl.textContent = name[0].toUpperCase();
 }
 
 async function loadAdminUsers() {
