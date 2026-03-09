@@ -562,6 +562,60 @@ export default {
       } catch(err) { return json({ error: err.message }, 500); }
     }
 
+    // ── POST /api/admin/gen-bot-avatar ──────────────────────
+    if (url.pathname === '/api/admin/gen-bot-avatar' && request.method === 'POST') {
+      try {
+        const token = request.headers.get('X-User-Token');
+        const user = await getUser(token);
+        const admin = await getProfile(user?.id);
+        if (!admin?.is_admin) return json({ error: 'Forbidden' }, 403);
+
+        const { prompt } = await request.json();
+        if (!prompt) return json({ error: 'Prompt required' }, 400);
+
+        const cfHeaders = { 'Authorization': `Bearer ${env.CF_AI_TOKEN}`, 'Content-Type': 'application/json' };
+        const baseUrl = `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/ai/run`;
+
+        // Generate image
+        let imgRes;
+        try {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 25000);
+          imgRes = await fetch(`${baseUrl}/@cf/black-forest-labs/flux-1-schnell`, {
+            method: 'POST', headers: cfHeaders,
+            body: JSON.stringify({ prompt, num_steps: 4 }), signal: controller.signal
+          });
+          clearTimeout(timer);
+          if (!imgRes.ok) throw new Error('flux failed');
+        } catch(_) {
+          return json({ error: 'Image generation failed. Try again.' }, 500);
+        }
+
+        const imgBytes = await imgRes.arrayBuffer();
+        if (!imgBytes.byteLength) return json({ error: 'Empty image' }, 500);
+
+        // Upload to storage as bot avatar
+        const path = `bot-avatar/nova-${Date.now()}.jpg`;
+        const uploadRes = await fetch(`${env.SUPABASE_URL}/storage/v1/object/generated-images/${path}`, {
+          method: 'POST',
+          headers: {
+            'apikey': env.SUPABASE_SERVICE_KEY, 'Authorization': `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+            'Content-Type': 'image/jpeg', 'x-upsert': 'true'
+          },
+          body: imgBytes
+        });
+
+        if (!uploadRes.ok) return json({ error: 'Storage upload failed' }, 500);
+
+        const publicUrl = `${env.SUPABASE_URL}/storage/v1/object/public/generated-images/${path}`;
+
+        // Save to site_config
+        await setSiteConfig('bot_avatar_url', publicUrl);
+
+        return json({ url: publicUrl });
+      } catch(err) { return json({ error: err.message }, 500); }
+    }
+
     // ── Static assets ────────────────────────────────────────
     try {
       return await env.ASSETS.fetch(request);
