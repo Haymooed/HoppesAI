@@ -541,6 +541,10 @@ async function sendMessage() {
       document.getElementById('limit-modal').classList.remove('hidden');
       return;
     }
+    if (data.moderated) {
+      appendMsg('assistant', '🚫 **Request blocked** — ' + data.error + '\n\nNovaAI does not generate harmful, explicit, or inappropriate content.');
+      return;
+    }
     if (data.error) { showToast(data.error, 'error'); return; }
 
     const reply = data.choices?.[0]?.message?.content || '(no response)';
@@ -646,6 +650,11 @@ async function doGenerateImage(prompt) {
     if (data.error === 'img_limit_reached') {
       document.getElementById('img-limit-reset').textContent = data.resetIn || '';
       document.getElementById('img-limit-modal').classList.remove('hidden');
+      return;
+    }
+    if (data.moderated) {
+      showToast('🚫 ' + data.error, 'error');
+      appendMsg('assistant', '🚫 **Image blocked** — ' + data.error);
       return;
     }
     if (data.error) { showToast(data.error, 'error'); return; }
@@ -1013,6 +1022,7 @@ function switchAdminTab(tab) {
   document.querySelectorAll('.admin-tab').forEach(el => el.classList.toggle('active', el.dataset.tab === tab));
   document.querySelectorAll('.admin-pane').forEach(el => el.classList.remove('active'));
   document.getElementById('admin-pane-' + tab)?.classList.add('active');
+  if (tab === 'mod') loadAdminModLogs();
 }
 
 async function loadAdminConfig() {
@@ -1269,6 +1279,28 @@ function applyBotProfile() {
   // Update welcome logo initial
   const wl = document.querySelector('.welcome-logo');
   if (wl) wl.textContent = name[0].toUpperCase();
+}
+
+async function loadAdminModLogs() {
+  const el = document.getElementById('admin-mod-logs');
+  if (!el) return;
+  el.innerHTML = '<div class="empty-state">Loading…</div>';
+  try {
+    const res = await fetch('/api/admin/mod-logs', { headers: {'X-User-Token': SESSION_TOKEN} });
+    const logs = await res.json();
+    if (!logs.length) { el.innerHTML = '<div class="empty-state">No violations logged.</div>'; return; }
+    el.innerHTML = logs.map(l => `
+      <div class="mod-log-row">
+        <div class="mod-log-left">
+          <span class="mod-log-type ${l.type}">${l.type}</span>
+          <span class="mod-log-user">${esc(l.profiles?.display_name || l.profiles?.username || 'Unknown')}</span>
+          <span class="mod-log-time">${new Date(l.created_at).toLocaleString('en-AU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</span>
+        </div>
+        <div class="mod-log-content">${esc((l.content||'').slice(0,120))}</div>
+      </div>`).join('');
+  } catch(e) {
+    el.innerHTML = '<div class="empty-state">Could not load logs.</div>';
+  }
 }
 
 async function loadAdminUsers() {
