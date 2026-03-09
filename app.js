@@ -1131,7 +1131,8 @@ function renderAdminBotPane() {
       <div class="bot-avatar-wrap">
         <div id="bot-avatar-preview" class="bot-avatar-preview" style="background:${c.bot_color||'#7c3aed'};color:#fff;font-size:28px;font-weight:700;display:flex;align-items:center;justify-content:center">${avatarHtml}</div>
         <input type="file" id="bot-avatar-upload" accept="image/*" style="display:none" onchange="uploadBotAvatar(event)"/>
-        <button class="btn-secondary sm" style="margin-top:8px" onclick="document.getElementById('bot-avatar-upload').click()">Upload Avatar</button>
+        <button class="btn-secondary sm" style="margin-top:8px" onclick="document.getElementById('bot-avatar-upload').click()">⬆️ Upload</button>
+        <button class="btn-secondary sm" style="margin-top:6px" onclick="openGenBotAvatar()">✨ AI Generate</button>
       </div>
       <div class="bot-fields">
         <label class="form-label">Bot Name</label>
@@ -1197,6 +1198,48 @@ async function saveBotProfile() {
   showToast('Bot profile saved!');
   await loadAdminConfig();
   applyBotProfile();
+}
+
+function openGenBotAvatar() {
+  document.getElementById('gen-bot-avatar-modal').classList.remove('hidden');
+}
+
+async function genBotAvatar() {
+  const prompt = document.getElementById('gen-avatar-prompt').value.trim();
+  if (!prompt) return showToast('Enter a prompt first');
+  const btn = document.getElementById('gen-avatar-btn');
+  btn.textContent = '⏳ Generating…'; btn.disabled = true;
+  const preview = document.getElementById('gen-avatar-preview');
+  preview.innerHTML = '<div class="gen-avatar-spinner"></div>';
+
+  try {
+    const res = await fetch('/api/admin/gen-bot-avatar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-User-Token': SESSION_TOKEN },
+      body: JSON.stringify({ prompt })
+    });
+    const data = await res.json();
+    if (data.error) { showToast(data.error, 'error'); preview.innerHTML = ''; return; }
+
+    // Show preview
+    preview.innerHTML = `<img src="${data.url}" style="width:120px;height:120px;border-radius:50%;object-fit:cover;border:3px solid var(--accent)"/>`;
+    document.getElementById('gen-avatar-confirm-btn').classList.remove('hidden');
+    document.getElementById('gen-avatar-confirm-btn').onclick = async () => {
+      // Save to config
+      await adminSetConfig('bot_avatar_url', data.url);
+      ADMIN_CFG.bot_avatar_url = data.url;
+      // Update preview in bot pane
+      const botPrev = document.getElementById('bot-avatar-preview');
+      if (botPrev) botPrev.innerHTML = `<img src="${data.url}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`;
+      applyBotProfile();
+      closeModal('gen-bot-avatar-modal');
+      showToast('Bot avatar updated!');
+    };
+  } catch(e) {
+    showToast('Generation failed', 'error');
+    preview.innerHTML = '';
+  }
+  btn.textContent = '✨ Generate'; btn.disabled = false;
 }
 
 async function adminSaveDiscordInvite() {
