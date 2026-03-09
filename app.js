@@ -84,6 +84,14 @@ async function doLogin() {
   if (error) authErr(error.message);
 }
 
+async function doGithubLogin() {
+  const { error } = await SB.auth.signInWithOAuth({
+    provider: 'github',
+    options: { redirectTo: window.location.origin }
+  });
+  if (error) authErr(error.message);
+}
+
 async function doRegister() {
   const name = gv('reg-name'), email = gv('reg-email'), pass = gv('reg-pass');
   if (!name || !email || !pass) return authErr('Fill in all fields.');
@@ -148,7 +156,7 @@ function refreshImgCounter() {
 
 // ── Section switching ──────────────────────────────────────
 function setActiveSection(section) {
-  ['chats','groups','updates','images'].forEach(s => {
+  ['chats','groups','updates','images','builder','notes','code'].forEach(s => {
     document.getElementById('nav-' + s)?.classList.toggle('active', s === section);
   });
   document.getElementById('chat-list').classList.toggle('hidden', section !== 'chats');
@@ -157,6 +165,8 @@ function setActiveSection(section) {
   document.getElementById('panel-' + section)?.classList.add('active');
   if (section === 'updates') { loadUpdateLog(); document.getElementById('updates-badge').classList.add('hidden'); }
   if (section === 'images') loadImagesPanel();
+  if (section === 'notes') initNotes();
+  if (section === 'code') initCodePlayground();
   closeSidebar();
 }
 
@@ -1444,3 +1454,386 @@ async function regenerateImage() {
 }
 
 boot();
+
+// ── Website Builder ────────────────────────────────────────
+let BUILDER_HISTORY = [];
+let BUILDER_CURRENT = '';
+let BUILDER_GENERATING = false;
+
+async function initBuilder() {
+  const preview = document.getElementById('builder-preview');
+  if (!preview.src || preview.src === 'about:blank') {
+    preview.srcdoc = `<html><body style="font-family:sans-serif;color:#888;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#0f0f12"><p>Describe a website and click Generate</p></body></html>`;
+  }
+}
+
+async function builderGenerate() {
+  if (BUILDER_GENERATING) return;
+  const prompt = gv('builder-prompt');
+  if (!prompt) { showToast('Describe your website first'); return; }
+  BUILDER_GENERATING = true;
+  const btn = document.getElementById('builder-gen-btn');
+  btn.textContent = '⏳ Generating…'; btn.disabled = true;
+  document.getElementById('builder-status').textContent = 'Generating website…';
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-User-Token': SESSION_TOKEN },
+      body: JSON.stringify({
+        messages: [
+          { role: 'system', content: `You are an expert web developer. Generate complete, beautiful, modern single-file HTML websites.
+Rules:
+- Return ONLY the complete HTML code, nothing else, no markdown, no explanation
+- Include all CSS in a <style> tag and all JS in a <script> tag
+- Use modern CSS (gradients, flexbox, grid, animations)
+- Make it fully responsive and visually impressive
+- Use a dark theme by default unless specified otherwise
+- Include realistic placeholder content
+- Make it production-ready quality` },
+          { role: 'user', content: prompt }
+        ],
+        temperature: 0.7,
+        max_tokens: 4096
+      })
+    });
+    const data = await res.json();
+    const html = data.choices?.[0]?.message?.content || '';
+    const clean = html.replace(/^```html\n?/,'').replace(/^```\n?/,'').replace(/```$/,'').trim();
+    if (!clean.includes('<html') && !clean.includes('<!DOCTYPE')) {
+      showToast('Generation failed — try a more specific prompt', 'error');
+    } else {
+      BUILDER_CURRENT = clean;
+      BUILDER_HISTORY.unshift({ prompt, html: clean, ts: Date.now() });
+      if (BUILDER_HISTORY.length > 20) BUILDER_HISTORY.pop();
+      renderBuilderPreview(clean);
+      renderBuilderHistory();
+      document.getElementById('builder-status').textContent = '✅ Generated! Click Export to download.';
+    }
+  } catch(e) {
+    showToast('Generation failed', 'error');
+    document.getElementById('builder-status').textContent = '';
+  }
+  btn.textContent = '✨ Generate'; btn.disabled = false;
+  BUILDER_GENERATING = false;
+}
+
+async function builderRefine() {
+  if (!BUILDER_CURRENT) { showToast('Generate a site first'); return; }
+  const instruction = gv('builder-refine');
+  if (!instruction) { showToast('Enter a refinement instruction'); return; }
+  BUILDER_GENERATING = true;
+  const btn = document.getElementById('builder-refine-btn');
+  btn.textContent = '⏳ Refining…'; btn.disabled = true;
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-User-Token': SESSION_TOKEN },
+      body: JSON.stringify({
+        messages: [
+          { role: 'system', content: 'You are a web developer. Modify the provided HTML based on the instruction. Return ONLY the complete updated HTML, no explanation.' },
+          { role: 'user', content: `Current HTML:\n${BUILDER_CURRENT}\n\nInstruction: ${instruction}` }
+        ],
+        temperature: 0.5, max_tokens: 4096
+      })
+    });
+    const data = await res.json();
+    const html = data.choices?.[0]?.message?.content || '';
+    const clean = html.replace(/^```html\n?/,'').replace(/^```\n?/,'').replace(/```$/,'').trim();
+    if (clean.includes('<')) {
+      BUILDER_CURRENT = clean;
+      BUILDER_HISTORY.unshift({ prompt: instruction, html: clean, ts: Date.now() });
+      renderBuilderPreview(clean);
+      renderBuilderHistory();
+      document.getElementById('builder-refine').value = '';
+      document.getElementById('builder-status').textContent = '✅ Refined!';
+    }
+  } catch(e) { showToast('Refinement failed', 'error'); }
+  btn.textContent = '🔧 Refine'; btn.disabled = false;
+  BUILDER_GENERATING = false;
+}
+
+function renderBuilderPreview(html) {
+  const preview = document.getElementById('builder-preview');
+  preview.srcdoc = html;
+}
+
+function builderExportHTML() {
+  if (!BUILDER_CURRENT) { showToast('Nothing to export'); return; }
+  const blob = new Blob([BUILDER_CURRENT], { type: 'text/html' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'nova-website.html';
+  a.click();
+  showToast('Downloaded!');
+}
+
+function builderCopyHTML() {
+  if (!BUILDER_CURRENT) return;
+  navigator.clipboard.writeText(BUILDER_CURRENT);
+  showToast('HTML copied!');
+}
+
+function builderViewSource() {
+  if (!BUILDER_CURRENT) return;
+  const w = window.open('', '_blank');
+  w.document.write('<pre style="font-family:monospace;background:#0f0f12;color:#e0e0e0;padding:20px;white-space:pre-wrap">' + BUILDER_CURRENT.replace(/</g,'&lt;') + '</pre>');
+}
+
+function builderTogglePreview() {
+  const preview = document.getElementById('builder-preview');
+  const code = document.getElementById('builder-code-view');
+  const showing = !code.classList.contains('hidden');
+  if (showing) {
+    code.classList.add('hidden'); preview.classList.remove('hidden');
+  } else {
+    code.classList.remove('hidden'); preview.classList.add('hidden');
+    code.value = BUILDER_CURRENT;
+  }
+}
+
+function builderApplyCode() {
+  const code = document.getElementById('builder-code-view');
+  BUILDER_CURRENT = code.value;
+  renderBuilderPreview(BUILDER_CURRENT);
+  code.classList.add('hidden');
+  document.getElementById('builder-preview').classList.remove('hidden');
+  showToast('Changes applied');
+}
+
+function renderBuilderHistory() {
+  const el = document.getElementById('builder-history');
+  if (!BUILDER_HISTORY.length) { el.innerHTML = ''; return; }
+  el.innerHTML = '<div class="builder-history-label">History</div>' +
+    BUILDER_HISTORY.slice(0,8).map((h,i) => `
+      <div class="builder-hist-item" onclick="loadBuilderHistory(${i})" title="${esc(h.prompt)}">
+        ${esc(h.prompt.slice(0,30))}…
+      </div>`).join('');
+}
+
+function loadBuilderHistory(i) {
+  const h = BUILDER_HISTORY[i];
+  if (!h) return;
+  BUILDER_CURRENT = h.html;
+  renderBuilderPreview(h.html);
+  document.getElementById('builder-prompt').value = h.prompt;
+  showToast('Loaded from history');
+}
+
+// ── Notes ──────────────────────────────────────────────────
+let NOTES = [];
+let CURRENT_NOTE = null;
+
+function initNotes() {
+  NOTES = JSON.parse(localStorage.getItem('nova_notes') || '[]');
+  renderNotesList();
+  if (NOTES.length) openNote(NOTES[0].id);
+  else newNote();
+}
+
+function saveNotes() {
+  localStorage.setItem('nova_notes', JSON.stringify(NOTES));
+}
+
+function newNote() {
+  const note = { id: Date.now().toString(), title: 'Untitled Note', content: '', updated: Date.now() };
+  NOTES.unshift(note);
+  saveNotes();
+  renderNotesList();
+  openNote(note.id);
+}
+
+function openNote(id) {
+  CURRENT_NOTE = id;
+  const note = NOTES.find(n => n.id === id);
+  if (!note) return;
+  document.getElementById('note-title').value = note.title;
+  document.getElementById('note-editor').value = note.content;
+  document.getElementById('note-updated').textContent = 'Updated ' + new Date(note.updated).toLocaleString('en-AU', { day:'numeric',month:'short',hour:'2-digit',minute:'2-digit' });
+  renderNotesList();
+}
+
+function saveCurrentNote() {
+  if (!CURRENT_NOTE) return;
+  const note = NOTES.find(n => n.id === CURRENT_NOTE);
+  if (!note) return;
+  note.title = document.getElementById('note-title').value || 'Untitled Note';
+  note.content = document.getElementById('note-editor').value;
+  note.updated = Date.now();
+  saveNotes();
+  renderNotesList();
+  document.getElementById('note-updated').textContent = 'Saved just now';
+}
+
+function deleteCurrentNote() {
+  if (!CURRENT_NOTE) return;
+  if (!confirm('Delete this note?')) return;
+  NOTES = NOTES.filter(n => n.id !== CURRENT_NOTE);
+  saveNotes();
+  renderNotesList();
+  CURRENT_NOTE = null;
+  if (NOTES.length) openNote(NOTES[0].id);
+  else { document.getElementById('note-title').value = ''; document.getElementById('note-editor').value = ''; }
+}
+
+function renderNotesList() {
+  const el = document.getElementById('notes-list');
+  if (!NOTES.length) { el.innerHTML = '<p class="sidebar-empty" style="padding:12px">No notes yet</p>'; return; }
+  el.innerHTML = NOTES.map(n => `
+    <div class="note-item ${n.id === CURRENT_NOTE ? 'active' : ''}" onclick="openNote('${n.id}')">
+      <div class="note-item-title">${esc(n.title)}</div>
+      <div class="note-item-preview">${esc(n.content.slice(0,50)) || 'Empty note'}</div>
+    </div>`).join('');
+}
+
+async function aiEnhanceNote() {
+  if (!CURRENT_NOTE) return;
+  const content = document.getElementById('note-editor').value;
+  if (!content.trim()) { showToast('Write something first'); return; }
+  const btn = document.getElementById('note-ai-btn');
+  btn.textContent = '⏳'; btn.disabled = true;
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-User-Token': SESSION_TOKEN },
+      body: JSON.stringify({
+        messages: [
+          { role: 'system', content: 'Improve and expand the following note. Keep the same meaning but make it clearer, more structured, and more detailed. Return only the improved text.' },
+          { role: 'user', content: content }
+        ],
+        temperature: 0.6, max_tokens: 1024
+      })
+    });
+    const data = await res.json();
+    const improved = data.choices?.[0]?.message?.content;
+    if (improved) {
+      document.getElementById('note-editor').value = improved;
+      saveCurrentNote();
+      showToast('Note enhanced by AI!');
+    }
+  } catch(e) { showToast('AI enhancement failed', 'error'); }
+  btn.textContent = '✨ AI Enhance'; btn.disabled = false;
+}
+
+function exportNote() {
+  if (!CURRENT_NOTE) return;
+  const note = NOTES.find(n => n.id === CURRENT_NOTE);
+  if (!note) return;
+  const blob = new Blob([`# ${note.title}\n\n${note.content}`], { type: 'text/markdown' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = note.title.replace(/[^a-z0-9]/gi,'_') + '.md';
+  a.click();
+}
+
+// Auto-save notes every 2s while typing
+let noteSaveTimer = null;
+function noteInput() {
+  clearTimeout(noteSaveTimer);
+  noteSaveTimer = setTimeout(saveCurrentNote, 1500);
+}
+
+// ── Code Playground ────────────────────────────────────────
+let CODE_OUTPUT_FRAME = null;
+
+function initCodePlayground() {
+  if (document.getElementById('code-editor').value) return;
+  document.getElementById('code-editor').value = `<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { font-family: sans-serif; background: #0f0f12; color: #e0e0e0; padding: 20px; }
+    h1 { color: #9d5cff; }
+  </style>
+</head>
+<body>
+  <h1>Hello from Nova Code!</h1>
+  <p>Edit this HTML/CSS/JS and click Run.</p>
+  <button onclick="alert('It works!')">Click me</button>
+</body>
+</html>`;
+}
+
+function runCode() {
+  const code = document.getElementById('code-editor').value;
+  const lang = document.getElementById('code-lang').value;
+  const frame = document.getElementById('code-output');
+  if (lang === 'html') {
+    frame.srcdoc = code;
+  } else if (lang === 'js') {
+    frame.srcdoc = `<html><body style="background:#0f0f12;color:#e0e0e0;font-family:monospace;padding:16px"><script>
+      const _log = console.log.bind(console);
+      const _out = document.createElement('pre');
+      document.body.appendChild(_out);
+      console.log = (...a) => { _out.textContent += a.map(x=>JSON.stringify(x,null,2)).join(' ') + '\\n'; _log(...a); };
+      try { ${code} } catch(e) { _out.textContent += '\\nError: ' + e.message; _out.style.color='#f87171'; }
+    <\/script></body></html>`;
+  } else if (lang === 'css') {
+    frame.srcdoc = `<html><head><style>body{background:#0f0f12;color:#e0e0e0;padding:20px;font-family:sans-serif}${code}</style></head><body><h1>H1 Heading</h1><p>Paragraph text</p><button>Button</button><ul><li>List item 1</li><li>List item 2</li></ul></body></html>`;
+  }
+}
+
+async function aiFixCode() {
+  const code = document.getElementById('code-editor').value;
+  if (!code.trim()) return;
+  const btn = document.getElementById('code-ai-fix-btn');
+  btn.textContent = '⏳ Fixing…'; btn.disabled = true;
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-User-Token': SESSION_TOKEN },
+      body: JSON.stringify({
+        messages: [
+          { role: 'system', content: 'Fix any bugs in this code and improve it. Return ONLY the fixed code, no explanation, no markdown.' },
+          { role: 'user', content: code }
+        ],
+        temperature: 0.2, max_tokens: 2048
+      })
+    });
+    const data = await res.json();
+    const fixed = data.choices?.[0]?.message?.content?.replace(/^```[\w]*\n?/,'').replace(/```$/,'').trim();
+    if (fixed) { document.getElementById('code-editor').value = fixed; showToast('Code fixed by AI!'); runCode(); }
+  } catch(e) { showToast('AI fix failed', 'error'); }
+  btn.textContent = '🤖 AI Fix'; btn.disabled = false;
+}
+
+async function aiGenerateCode() {
+  const prompt = gv('code-prompt');
+  if (!prompt) { showToast('Describe what to generate'); return; }
+  const lang = document.getElementById('code-lang').value;
+  const btn = document.getElementById('code-gen-btn');
+  btn.textContent = '⏳ Generating…'; btn.disabled = true;
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-User-Token': SESSION_TOKEN },
+      body: JSON.stringify({
+        messages: [
+          { role: 'system', content: `Generate ${lang.toUpperCase()} code. Return ONLY the code, no explanation, no markdown fences.` },
+          { role: 'user', content: prompt }
+        ],
+        temperature: 0.4, max_tokens: 2048
+      })
+    });
+    const data = await res.json();
+    const code = data.choices?.[0]?.message?.content?.replace(/^```[\w]*\n?/,'').replace(/```$/,'').trim();
+    if (code) { document.getElementById('code-editor').value = code; runCode(); document.getElementById('code-prompt').value = ''; showToast('Code generated!'); }
+  } catch(e) { showToast('Generation failed', 'error'); }
+  btn.textContent = '✨ Generate'; btn.disabled = false;
+}
+
+function copyCode() {
+  navigator.clipboard.writeText(document.getElementById('code-editor').value);
+  showToast('Copied!');
+}
+
+function downloadCode() {
+  const code = document.getElementById('code-editor').value;
+  const lang = document.getElementById('code-lang').value;
+  const ext = { html:'html', js:'js', css:'css' }[lang] || 'txt';
+  const blob = new Blob([code], { type: 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `nova-code.${ext}`;
+  a.click();
+}
