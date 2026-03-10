@@ -39,22 +39,45 @@ async function boot() {
     const cfg = await fetch('/api/config').then(r => r.json());
     SUPABASE_URL = cfg.supabaseUrl;
     SUPABASE_ANON = cfg.supabaseAnon;
-    SB = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+    // IMPORTANT: let Supabase read the hash BEFORE doing anything else
+    SB = supabase.createClient(SUPABASE_URL, SUPABASE_ANON, {
+      auth: {
+        detectSessionInUrl: true,
+        persistSession: true,
+        autoRefreshToken: true,
+      }
+    });
     loadSettings();
     applySettings();
-    // Handle OAuth hash redirect (access_token in URL hash)
-    if (window.location.hash && window.location.hash.includes('access_token')) {
-      window.history.replaceState({}, '', window.location.pathname);
-      const { data: { session } } = await SB.auth.getSession();
-      if (session) { await initApp(session); return; }
-    }
-    const { data: { session } } = await SB.auth.getSession();
-    if (session) await initApp(session);
-    else showAuth();
+
+    // Register the auth state listener FIRST so we never miss SIGNED_IN
+    let booted = false;
     SB.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'SIGNED_IN' && session) await initApp(session);
-      if (event === 'SIGNED_OUT') showAuth();
+      if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session) {
+        if (!booted) {
+          booted = true;
+          // Clean up OAuth query params / hash from URL
+          if (window.location.search.includes('oauth') || window.location.hash.includes('access_token')) {
+            window.history.replaceState({}, '', window.location.pathname);
+          }
+          await initApp(session);
+        }
+      }
+      if (event === 'SIGNED_OUT') {
+        booted = false;
+        showAuth();
+      }
     });
+
+    // Also check for an existing session (page refresh / already logged in)
+    const { data: { session } } = await SB.auth.getSession();
+    if (session && !booted) {
+      booted = true;
+      await initApp(session);
+    } else if (!session && !window.location.hash.includes('access_token')) {
+      // Only show auth if there's no pending OAuth hash being processed
+      setTimeout(() => { if (!booted) showAuth(); }, 500);
+    }
   } catch(e) {
     document.getElementById('auth-screen').classList.remove('hidden');
     console.error('Boot error:', e);
@@ -64,8 +87,32 @@ async function boot() {
 async function initApp(session) {
   handleOAuthCallback();
   SESSION_TOKEN = session.access_token;
-  const { data: prof } = await SB.from('profiles').select('*').eq('id', session.user.id).single();
-  ME = prof || { id: session.user.id, display_name: session.user.email?.split('@')[0] || 'User', tier: 'free', avatar_color: COLORS[0] };
+  let { data: prof } = await SB.from('profiles').select('*').eq('id', session.user.id).single();
+  // If no profile exists yet (new OAuth user), create one now
+  if (!prof) {
+    const user = session.user;
+    const rawName = user.user_metadata?.full_name
+      || user.user_metadata?.name
+      || user.user_metadata?.user_name
+      || user.email?.split('@')[0]
+      || 'User';
+    const safeName = rawName.replace(/\s+/g, '_') + '_' + Date.now().toString(36);
+    const newProf = {
+      id: user.id,
+      display_name: safeName,
+      avatar_url: user.user_metadata?.avatar_url || null,
+      tier: 'free',
+      is_admin: false,
+      is_banned: false,
+      avatar_color: COLORS[Math.floor(Math.random() * COLORS.length)],
+      daily_msgs: 0,
+      daily_imgs: 0,
+    };
+    const { data: created, error: profErr } = await SB.from('profiles').upsert(newProf).select().single();
+    if (profErr) console.error('Profile creation error:', profErr.message);
+    prof = created || newProf;
+  }
+  ME = prof;
   DAILY_IMGS = ME.daily_imgs || 0;
   // Use admin-configured limits if available, else sensible defaults
   const cfgImgLimitFree = parseInt(window._adminCfgCache?.global_img_limit_free || '3');
@@ -134,7 +181,7 @@ async function doGithubLogin() {
   setOAuthLoading('github', true);
   const { error } = await SB.auth.signInWithOAuth({
     provider: 'github',
-    options: { redirectTo: window.location.origin + '?oauth=github' }
+    options: { redirectTo: window.location.origin + '/' }
   });
   if (error) { setOAuthLoading('github', false); authErr(error.message); }
 }
@@ -143,7 +190,7 @@ async function doDiscordLogin() {
   setOAuthLoading('discord', true);
   const { error } = await SB.auth.signInWithOAuth({
     provider: 'discord',
-    options: { redirectTo: window.location.origin + '?oauth=discord' }
+    options: { redirectTo: window.location.origin + '/' }
   });
   if (error) { setOAuthLoading('discord', false); authErr(error.message); }
 }
